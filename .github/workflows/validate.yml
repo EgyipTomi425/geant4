@@ -3,6 +3,7 @@ name: Validate generator
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -25,3 +26,27 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Smoke-test default configuration
         run: python scripts/run_simulations.py --config scripts/config.json --dry-run
+
+  simulation-integration:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the generator image
+        run: ./update.sh
+      - name: Run all jobs from the default JSON config
+        run: ./singularity/geant-generator.sif --config ./singularity/config.json --jobs 2
+      - name: Verify generated ROOT and CSV files
+        run: |
+          root_count="$(find singularity/output/roots -type f -name '*.root' | wc -l)"
+          csv_count="$(find singularity/output/csv -type f -name '*.csv' | wc -l)"
+          test "$root_count" -eq 8 || {
+            echo "Expected 8 ROOT files, found $root_count" >&2
+            exit 1
+          }
+          test "$csv_count" -eq 8 || {
+            echo "Expected 8 CSV files, found $csv_count" >&2
+            exit 1
+          }

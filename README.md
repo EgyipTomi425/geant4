@@ -1,5 +1,7 @@
 # EIC Geant4 generator
 
+[![Validate generator](https://github.com/EgyipTomi425/geant4/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/EgyipTomi425/geant4/actions/workflows/validate.yml)
+
 This repository builds a portable Singularity/Apptainer image for running
 Geant4 simulations through the EIC XL software environment. The generated SIF
 contains the simulation runner and both ROOT-to-CSV converters. The JSON config
@@ -30,18 +32,20 @@ and generated data remain outside the image.
 ## Requirements
 
 - Linux on an architecture supported by the EIC XL image.
-- Apptainer or Singularity. `update.sh` first tries an unprivileged fakeroot
-  build. If fakeroot is unavailable or not configured, it falls back to `sudo`.
-  A root shell can build without either mechanism.
+- Apptainer or Singularity. If neither is installed, `update.sh` attempts to
+  install Apptainer using the system package manager (apt, dnf, yum, zypper, or
+  pacman); this requires root or `sudo`. It first tries an unprivileged fakeroot
+  build, then falls back to `sudo` when needed.
 - Network access to the EIC container registry for a normal update. The EIC XL
   nightly image is pulled from `docker://eicweb/eic_xl:nightly`.
 - Enough disk space for both the base and generator SIF images (each is several
   gigabytes).
 
-No files outside this repository are required for a clean clone. `update.sh`
-creates `.build/` and `singularity/` as needed, and fetches the EIC base image
-itself. `--base-sif` is only an optional override for an existing local base
-image; it is not needed for the normal fresh-clone workflow.
+No EIC files outside this repository are required for a clean clone. `update.sh`
+creates `.build/` and `singularity/` as needed, installs Apptainer if needed, and
+fetches the EIC base image itself. Python and the Geant/EIC Python environment
+are provided by the base image. `--base-sif` is only an optional override for an
+existing local base image; it is not needed for the normal fresh-clone workflow.
 
 ## Build or update
 
@@ -158,11 +162,11 @@ build before a large production run.
 ## Continuous integration
 
 GitHub Actions runs Python/JSON/shell syntax checks, unit tests for config and
-job planning, and the default-config dry-run on pushes and pull requests. It
-does not build the multi-gigabyte EIC image or run Geant simulations on
-GitHub-hosted runners; those integration checks require the EIC image and a
-Singularity/Apptainer-capable Linux host. `update.sh` is the documented local
-build-and-integration path.
+job planning, and the default-config dry-run on pushes and pull requests. On
+pushes to `main` (and manual `workflow_dispatch` runs), it also builds the EIC
+container, runs the full default JSON configuration (8 jobs, 100 events each),
+and verifies that all ROOT and CSV outputs were created. The integration job
+installs Apptainer through `update.sh` if it is not already available.
 
 ## Troubleshooting
 

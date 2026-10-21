@@ -58,12 +58,43 @@ while (($#)); do
     esac
 done
 
+run_privileged() {
+    if ((EUID == 0)); then
+        "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo "$@"
+    else
+        echo "ERROR: installing Apptainer requires root or sudo." >&2
+        return 1
+    fi
+}
+
+if ! command -v apptainer >/dev/null 2>&1 \
+    && ! command -v singularity >/dev/null 2>&1; then
+    echo "Apptainer/Singularity not found; attempting to install Apptainer..."
+    if command -v apt-get >/dev/null 2>&1; then
+        run_privileged apt-get update
+        run_privileged apt-get install -y apptainer
+    elif command -v dnf >/dev/null 2>&1; then
+        run_privileged dnf install -y apptainer
+    elif command -v yum >/dev/null 2>&1; then
+        run_privileged yum install -y apptainer
+    elif command -v zypper >/dev/null 2>&1; then
+        run_privileged zypper --non-interactive install apptainer
+    elif command -v pacman >/dev/null 2>&1; then
+        run_privileged pacman --noconfirm -S apptainer
+    else
+        echo "ERROR: no supported package manager found. Install Apptainer or Singularity, then rerun." >&2
+        exit 1
+    fi
+fi
+
 if command -v apptainer >/dev/null 2>&1; then
     CONTAINER_RUNTIME="$(command -v apptainer)"
 elif command -v singularity >/dev/null 2>&1; then
     CONTAINER_RUNTIME="$(command -v singularity)"
 else
-    echo "ERROR: Apptainer or Singularity must be installed and available in PATH." >&2
+    echo "ERROR: Apptainer installation did not provide an apptainer command." >&2
     exit 1
 fi
 
