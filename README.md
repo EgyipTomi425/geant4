@@ -45,10 +45,10 @@ and generated data remain outside the image.
   installation has a bundled `proot` with unresolved libraries, the updater
   rebuilds and replaces that helper before continuing; it does not otherwise
   upgrade an existing Apptainer installation.
-  For image builds, a non-root invocation tries fakeroot, then `sudo`, then
-  unprivileged `proot`; a root invocation tries a privileged build first,
-  then `proot`. On Debian/Ubuntu it installs `proot` if needed; installing
-  packages requires root or `sudo`.
+  For image builds, a non-root invocation tries fakeroot and then `sudo`;
+  a root invocation tries a privileged build. These methods require working
+  user namespaces or a supported setuid Apptainer installation. PRoot cannot
+  replace those kernel features for Apptainer image builds.
 - Network access to the EIC container registry for a normal update. The EIC XL
   nightly image is pulled from `docker://eicweb/eic_xl:nightly`.
 - Enough disk space for both the base and generator SIF images (each is several
@@ -92,13 +92,15 @@ For an offline build or a local test using an existing compatible EIC image:
 ### Restricted hosts
 
 Some containerized or cluster hosts disable the Linux user namespaces needed
-for local image builds. When run as a normal user, the updater tries fakeroot,
-`sudo`, and `proot`; when run as root, it tries a privileged build followed
-by `proot`. If all available methods fail, it prints a highlighted explanation
-and stops. `sudo` inside a container cannot override user-namespace
-restrictions imposed by the host kernel. Run the update on the Linux host, or
-ask the host administrator to enable Apptainer build/user-namespace support
-for the container.
+for local image builds. When run as a normal user, the updater tries fakeroot
+and then `sudo`; when run as root, it tries a privileged build. If these methods
+fail because the host blocks user namespaces and Apptainer has no supported
+setuid installation, the updater reports the limitation and stops. `sudo`
+inside a container cannot override restrictions imposed by the host kernel,
+and PRoot is not a substitute for the kernel features required by Apptainer.
+Run the update on a Linux host with user namespaces enabled, or ask the host
+administrator to provide Apptainer build/user-namespace support for the
+container.
 
 The downloaded base image is kept at `.build/eic_xl-nightly.sif` and is not
 deleted after a successful build. On the next update, Apptainer pulls the

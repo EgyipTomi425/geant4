@@ -323,53 +323,18 @@ PY
     rm -rf -- "$source_dir"
 }
 
-install_proot() {
-    if command -v proot >/dev/null 2>&1; then
-        return
-    fi
-    if ! command -v apt-get >/dev/null 2>&1 \
-        || ! grep -Eq '^ID=(ubuntu|debian)$' /etc/os-release; then
-        echo "ERROR: proot is required for the unprivileged build fallback. Install proot and rerun." >&2
-        return 1
-    fi
-
-    echo "proot not found; installing it for the unprivileged build fallback..."
-    if ! run_privileged apt-get update; then
-        echo "ERROR: could not update package indexes to install proot." >&2
-        return 1
-    fi
-    if ! run_privileged apt-get install -y --no-install-recommends proot; then
-        echo "ERROR: could not install proot." >&2
-        return 1
-    fi
-    if ! command -v proot >/dev/null 2>&1; then
-        echo "ERROR: proot installation did not provide a proot command." >&2
-        return 1
-    fi
-}
-
-try_proot_build() {
-    if ! install_proot; then
-        return 1
-    fi
-    rm -f -- "$BUILD_IMAGE"
-    echo "Trying an unprivileged Apptainer build with proot..."
-    if "$CONTAINER_RUNTIME" build --force "$BUILD_IMAGE" Apptainer.def; then
-        return 0
-    fi
-    return 1
-}
-
 report_local_build_failure() {
     print_green_block <<'EOF'
 
 ERROR: all local Apptainer build methods failed.
 If the errors above mention user namespaces or "Operation not permitted",
-this host/container blocks kernel operations required for the build. Sudo
-inside a container cannot override that host restriction.
+this host/container blocks kernel operations needed to unpack and build the
+image. PRoot cannot replace these kernel features, and sudo inside a
+restricted container cannot enable them.
 
-Run this update on the Linux host, or ask the host administrator to enable
-Apptainer build/user-namespace support for this container.
+Run this update on a Linux host with unprivileged user namespaces enabled,
+or ask the host administrator to enable user namespaces for this container
+or provide a supported setuid Apptainer installation.
 The previous working generator image, if any, has been preserved.
 EOF
 }
@@ -434,12 +399,8 @@ echo "Building generator image with $CONTAINER_RUNTIME..."
 cd "$ROOT_DIR"
 if ((EUID == 0)); then
     if ! "$CONTAINER_RUNTIME" build --force "$BUILD_IMAGE" Apptainer.def; then
-        echo "Privileged local build failed; trying an unprivileged proot build."
-        if ! try_proot_build; then
-            echo "Local proot build failed."
-            report_local_build_failure
-            exit 1
-        fi
+        report_local_build_failure
+        exit 1
     fi
 else
     echo "Trying an unprivileged fakeroot build..."
@@ -459,17 +420,14 @@ else
                 sudo chown "$(id -u):$(id -g)" "$BUILD_IMAGE"
                 sudo_build_succeeded=true
             else
-                echo "Sudo build failed; trying an unprivileged proot build."
+                echo "Sudo build failed."
             fi
         else
-            echo "sudo is unavailable; trying an unprivileged proot build."
+            echo "sudo is unavailable."
         fi
         if [[ "$sudo_build_succeeded" == false ]]; then
-            if ! try_proot_build; then
-                echo "Local proot build failed."
-                report_local_build_failure
-                exit 1
-            fi
+            report_local_build_failure
+            exit 1
         fi
     fi
 fi
