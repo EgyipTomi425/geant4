@@ -73,6 +73,16 @@ run_privileged() {
     fi
 }
 
+print_green_block() {
+    if [[ -t 2 && -z "${NO_COLOR:-}" && "${TERM:-dumb}" != dumb ]]; then
+        printf '\033[1;32m' >&2
+    fi
+    cat >&2
+    if [[ -t 2 && -z "${NO_COLOR:-}" && "${TERM:-dumb}" != dumb ]]; then
+        printf '\033[0m' >&2
+    fi
+}
+
 mkdir -p "$BUILD_DIR" "$OUTPUT_DIR/output" "$TMP_DIR_PARENT"
 TMP_DIR="$(mktemp -d "$TMP_DIR_PARENT/geant-generator.XXXXXX")"
 export TMPDIR="$TMP_DIR"
@@ -193,7 +203,7 @@ try_remote_build() {
         return 1
     fi
 
-    cat >&2 <<'EOF'
+    print_green_block <<'EOF'
 
 =======================================================================
 LOCAL CONTAINER BUILD FAILED
@@ -221,7 +231,7 @@ From: docker://eicweb/eic_xl:nightly' \
         return 0
     fi
 
-    cat >&2 <<'EOF'
+    print_green_block <<'EOF'
 
 ERROR: the remote SingularityCE build failed.
 If the error mentions a missing authentication token, run:

@@ -94,8 +94,10 @@ singularity remote login
 The login command may ask for account credentials or a token in the terminal;
 do not put credentials in the repository or share them. If the updater cannot
 authenticate, it prints these commands and exits without replacing an existing
-working SIF. Without remote-build access, ask the host administrator to enable
-the required local build support or build on another machine.
+working SIF. The login/retry instructions are highlighted in green in an
+interactive terminal; color is disabled when output is redirected or
+`NO_COLOR` is set. Without remote-build access, ask the host administrator to
+enable the required local build support or build on another machine.
 
 The downloaded base image is kept in `.build/eic_xl-nightly.sif`; it is a
 persistent cache and is not deleted after a successful build, so later updates
