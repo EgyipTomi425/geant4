@@ -76,15 +76,19 @@ For an offline build or a local test using an existing compatible EIC image:
 The downloaded base image is kept in `.build/eic_xl-nightly.sif`; it is a
 persistent cache and is not deleted after a successful build, so later updates
 can reuse it. It is ignored by Git. The generated image and config are kept in
-`singularity/`; that directory is also not committed. Only the temporary
-`.build/tmp/` directory is removed after a successful build. To reclaim the base
-image's disk space manually, remove `.build/eic_xl-nightly.sif`; the next update
-will download it again.
+`singularity/`; that directory is also not committed. The updater removes its
+per-run build temporary directory on both success and failure, and removes the
+`.build/tmp/` parent when it is empty. It stages the generator SIF separately
+and only replaces the existing image after a successful build, so a failed
+update does not leave a partial SIF or discard the previous working image. To
+reclaim the base image's disk space manually, remove `.build/eic_xl-nightly.sif`;
+the next update will download it again.
 
 Build temporary files default to `.build/tmp/`, keeping large image extraction
 and compression off potentially space-limited system temporary filesystems. Set
 `SINGULARITY_TMPDIR` before running `update.sh` to use another writable
-location; a user-selected directory is left untouched.
+location; the updater creates and removes its own subdirectory there, leaving
+the user-selected directory and its other contents untouched.
 
 ## Run
 

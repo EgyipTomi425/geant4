@@ -5,11 +5,13 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$ROOT_DIR/.build"
 BASE_IMAGE="$BUILD_DIR/eic_xl-nightly.sif"
 OUTPUT_DIR="$ROOT_DIR/singularity"
-TMP_DIR="${SINGULARITY_TMPDIR:-$BUILD_DIR/tmp}"
-CLEAN_TMP_DIR=false
+TMP_DIR_PARENT="${SINGULARITY_TMPDIR:-$BUILD_DIR/tmp}"
+CLEAN_TMP_PARENT=false
 if [[ -z "${SINGULARITY_TMPDIR:-}" ]]; then
-    CLEAN_TMP_DIR=true
+    CLEAN_TMP_PARENT=true
 fi
+TMP_DIR=""
+BUILD_IMAGE="$OUTPUT_DIR/.geant-generator.sif.tmp.$$"
 RESET_CONFIG=false
 LOCAL_BASE=""
 SINGULARITY_CE_VERSION="4.6.0"
@@ -71,17 +73,32 @@ run_privileged() {
     fi
 }
 
-mkdir -p "$BUILD_DIR" "$OUTPUT_DIR/output" "$TMP_DIR"
+mkdir -p "$BUILD_DIR" "$OUTPUT_DIR/output" "$TMP_DIR_PARENT"
+TMP_DIR="$(mktemp -d "$TMP_DIR_PARENT/geant-generator.XXXXXX")"
 export TMPDIR="$TMP_DIR"
 export SINGULARITY_TMPDIR="$TMP_DIR"
 
-cleanup_tmp_dir() {
+cleanup_temporary_files() {
     local exit_status=$?
-    if [[ "$CLEAN_TMP_DIR" == true && "$exit_status" -eq 0 ]]; then
-        rmdir -- "$TMP_DIR"
+    trap - EXIT
+
+    if [[ -e "$BUILD_IMAGE" ]] && ! rm -f -- "$BUILD_IMAGE"; then
+        echo "ERROR: could not remove incomplete image: $BUILD_IMAGE" >&2
+        exit_status=1
     fi
+    if [[ -n "$TMP_DIR" && -d "$TMP_DIR" ]] \
+        && ! rm -rf -- "$TMP_DIR"; then
+        echo "ERROR: could not remove temporary build directory: $TMP_DIR" >&2
+        exit_status=1
+    fi
+    if [[ "$CLEAN_TMP_PARENT" == true && -d "$TMP_DIR_PARENT" ]]; then
+        if ! rmdir -- "$TMP_DIR_PARENT"; then
+            echo "Keeping shared temporary directory because it could not be removed (for example, it is not empty): $TMP_DIR_PARENT" >&2
+        fi
+    fi
+    exit "$exit_status"
 }
-trap cleanup_tmp_dir EXIT
+trap cleanup_temporary_files EXIT
 
 install_singularity_ce() {
     if ! command -v apt-get >/dev/null 2>&1 \
@@ -187,22 +204,23 @@ fi
 echo "Building generator image with $CONTAINER_RUNTIME..."
 cd "$ROOT_DIR"
 if ((EUID == 0)); then
-    "$CONTAINER_RUNTIME" build --force "$OUTPUT_DIR/geant-generator.sif" Singularity.def
+    "$CONTAINER_RUNTIME" build --force "$BUILD_IMAGE" Singularity.def
 else
     echo "Trying an unprivileged fakeroot build..."
     if "$CONTAINER_RUNTIME" build --fakeroot --force \
-        "$OUTPUT_DIR/geant-generator.sif" Singularity.def; then
+        "$BUILD_IMAGE" Singularity.def; then
         :
     else
         echo "Fakeroot build failed or is unavailable."
         sudo_build_succeeded=false
         if command -v sudo >/dev/null 2>&1; then
             echo "Falling back to a sudo build..."
-            rm -f -- "$OUTPUT_DIR/geant-generator.sif"
+            rm -f -- "$BUILD_IMAGE"
             if sudo env TMPDIR="$TMPDIR" \
                 SINGULARITY_TMPDIR="$SINGULARITY_TMPDIR" \
                 "$CONTAINER_RUNTIME" build --force \
-                "$OUTPUT_DIR/geant-generator.sif" Singularity.def; then
+                "$BUILD_IMAGE" Singularity.def; then
+                sudo chown "$(id -u):$(id -g)" "$BUILD_IMAGE"
                 sudo_build_succeeded=true
             else
                 echo "Sudo build failed; trying an unprivileged proot build."
@@ -212,14 +230,15 @@ else
         fi
         if [[ "$sudo_build_succeeded" == false ]]; then
             install_proot
-            rm -f -- "$OUTPUT_DIR/geant-generator.sif"
+            rm -f -- "$BUILD_IMAGE"
             echo "Trying an unprivileged SingularityCE build with proot..."
             "$CONTAINER_RUNTIME" build --force \
-                "$OUTPUT_DIR/geant-generator.sif" Singularity.def
+                "$BUILD_IMAGE" Singularity.def
         fi
     fi
 fi
-chmod +x "$OUTPUT_DIR/geant-generator.sif"
+chmod +x "$BUILD_IMAGE"
+mv -f -- "$BUILD_IMAGE" "$OUTPUT_DIR/geant-generator.sif"
 
 echo "Built: $OUTPUT_DIR/geant-generator.sif"
 echo "Config: $OUTPUT_DIR/config.json"
