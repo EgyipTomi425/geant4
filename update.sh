@@ -115,8 +115,19 @@ install_apptainer() {
         return 1
     fi
 
-    echo "Apptainer not found; installing its build dependencies..."
+    echo "Apptainer not found; checking the Debian/Ubuntu package repositories first..."
     run_privileged apt-get update
+    if run_privileged apt-get install -y --no-install-recommends apptainer; then
+        if command -v apptainer >/dev/null 2>&1; then
+            echo "Installed Apptainer from the system package repository."
+            return
+        fi
+        echo "WARNING: the package install succeeded but did not provide apptainer; falling back to a source build." >&2
+    else
+        echo "Apptainer is unavailable from the configured package repositories; falling back to the latest upstream source release."
+    fi
+
+    echo "Installing build dependencies for the upstream Apptainer source build..."
     local packages=(
         autoconf automake build-essential cryptsetup curl dh-apparmor fakeroot
         git libattr1-dev libfuse3-dev liblz4-dev liblzma-dev liblzo2-dev
