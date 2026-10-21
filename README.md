@@ -78,6 +78,25 @@ For an offline build or a local test using an existing compatible EIC image:
 ./update.sh --base-sif "$HOME/eic_xl-nightly.sif"
 ```
 
+### Restricted hosts
+
+Some containerized or cluster hosts disable the Linux user namespaces needed
+for local image builds. The updater automatically tries fakeroot, `sudo`, and
+`proot`; if those fail, it attempts a SingularityCE remote build. Remote
+building requires a Singularity Container Services account with remote-build
+access. Log in once as the same user who will run the updater:
+
+```bash
+singularity remote login
+./update.sh
+```
+
+The login command may ask for account credentials or a token in the terminal;
+do not put credentials in the repository or share them. If the updater cannot
+authenticate, it prints these commands and exits without replacing an existing
+working SIF. Without remote-build access, ask the host administrator to enable
+the required local build support or build on another machine.
+
 The downloaded base image is kept in `.build/eic_xl-nightly.sif`; it is a
 persistent cache and is not deleted after a successful build, so later updates
 can reuse it. It is ignored by Git. The generated image and config are kept in
@@ -204,8 +223,10 @@ outputs were created. If SingularityCE is missing, `update.sh` installs it.
 - **Permission denied while building:** the updater tries fakeroot, `sudo`,
   and an unprivileged `proot` build, then tries the SingularityCE remote build
   service. Remote builds require a Singularity Container Services account and
-  `singularity remote login`. If remote builds are unavailable, configure user
-  namespaces on the host or build outside the restricted container.
+  `singularity remote login`; the updater prints the exact login and retry
+  commands if authentication is missing. If remote builds are unavailable,
+  configure user namespaces on the host or build outside the restricted
+  container.
 - **Config not found:** run from a directory containing `config.json` or pass
   `--config`.
 - **Output or bind errors:** use a writable host path and bind it into the

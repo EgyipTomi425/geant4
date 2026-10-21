@@ -193,6 +193,19 @@ try_remote_build() {
         return 1
     fi
 
+    cat >&2 <<'EOF'
+
+=======================================================================
+LOCAL CONTAINER BUILD FAILED
+The remote SingularityCE build requires a Singularity Container Services
+account with credentials already configured for this user.
+
+If you have not logged in on this machine, run:
+  singularity remote login
+Then rerun:
+  ./update.sh
+=======================================================================
+EOF
     echo "Trying the SingularityCE remote build service..."
     local remote_definition="$TMP_DIR/Singularity.remote.def"
     if ! sed '1,2c\
@@ -208,7 +221,17 @@ From: docker://eicweb/eic_xl:nightly' \
         return 0
     fi
 
-    echo "ERROR: remote build failed. Sign in with 'singularity remote login' and verify remote build service access." >&2
+    cat >&2 <<'EOF'
+
+ERROR: the remote SingularityCE build failed.
+If the error mentions a missing authentication token, run:
+  singularity remote login
+Then rerun:
+  ./update.sh
+Otherwise, check the remote build service error above and confirm your
+Singularity Container Services account has remote-build access.
+The previous working generator image, if any, has been preserved.
+EOF
     return 1
 }
 
