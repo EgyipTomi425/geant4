@@ -20,6 +20,9 @@ and generated data remain outside the image.
 - `scripts/check_secondaries.py` summarizes secondary-particle rows in a CSV.
 - `scripts/inspect_root_truth.py` inspects MC truth and contribution links in a
   ROOT file.
+- `.github/workflows/validate.yml` runs the source/configuration checks on
+  GitHub Actions.
+- `tests/` checks config interpretation, planned jobs, and MC-truth steering.
 - `singularity/` is generated locally and ignored by Git. It contains the
   built SIF, a working copy of the config, and output folders.
 - `.build/` is a local cache for the base EIC image and is ignored by Git.
@@ -145,6 +148,15 @@ stops with an explicit error.
 The selected detector version and the base EIC nightly image can change when
 the image is rebuilt; use the dry-run and a small simulation to validate a new
 build before a large production run.
+
+## Continuous integration
+
+GitHub Actions runs Python/JSON/shell syntax checks, unit tests for config and
+job planning, and the default-config dry-run on pushes and pull requests. It
+does not build the multi-gigabyte EIC image or run Geant simulations on
+GitHub-hosted runners; those integration checks require the EIC image and a
+Singularity/Apptainer-capable Linux host. `update.sh` is the documented local
+build-and-integration path.
 
 ## Troubleshooting
 
