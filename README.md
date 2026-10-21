@@ -92,12 +92,15 @@ singularity remote login
 ```
 
 The login command may ask for account credentials or a token in the terminal;
-do not put credentials in the repository or share them. If the updater cannot
-authenticate, it prints these commands and exits without replacing an existing
-working SIF. The login/retry instructions are highlighted in green in an
-interactive terminal; color is disabled when output is redirected or
-`NO_COLOR` is set. Without remote-build access, ask the host administrator to
-enable the required local build support or build on another machine.
+do not put credentials in the repository or share them. The updater prints
+the login command only when the remote service reports an authentication
+error. If authentication succeeds but the remote builder fails or returns no
+image, it says this is a build-service failure and directs you to that job's
+logs instead of asking you to log in again. These instructions are highlighted
+in green in an interactive terminal; color is disabled when output is
+redirected or `NO_COLOR` is set. Without remote-build access, ask the host
+administrator to enable the required local build support or build on another
+machine.
 
 The downloaded base image is kept in `.build/eic_xl-nightly.sif`; it is a
 persistent cache and is not deleted after a successful build, so later updates
@@ -224,11 +227,12 @@ outputs were created. If SingularityCE is missing, `update.sh` installs it.
   includes a versioned EPIC detector installation.
 - **Permission denied while building:** the updater tries fakeroot, `sudo`,
   and an unprivileged `proot` build, then tries the SingularityCE remote build
-  service. Remote builds require a Singularity Container Services account and
-  `singularity remote login`; the updater prints the exact login and retry
-  commands if authentication is missing. If remote builds are unavailable,
-  configure user namespaces on the host or build outside the restricted
-  container.
+  service. If the service reports a missing/invalid token, the updater prints
+  the `singularity remote login` and retry commands. Other remote failures,
+  including a build that returns no image, are identified separately; inspect
+  that job's logs in the Singularity Container Services account rather than
+  repeating login. If remote builds are unavailable, configure user namespaces
+  on the host or build outside the restricted container.
 - **Config not found:** run from a directory containing `config.json` or pass
   `--config`.
 - **Output or bind errors:** use a writable host path and bind it into the

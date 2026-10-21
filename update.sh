@@ -203,21 +203,9 @@ try_remote_build() {
         return 1
     fi
 
-    print_green_block <<'EOF'
-
-=======================================================================
-LOCAL CONTAINER BUILD FAILED
-The remote SingularityCE build requires a Singularity Container Services
-account with credentials already configured for this user.
-
-If you have not logged in on this machine, run:
-  singularity remote login
-Then rerun:
-  ./update.sh
-=======================================================================
-EOF
     echo "Trying the SingularityCE remote build service..."
     local remote_definition="$TMP_DIR/Singularity.remote.def"
+    local remote_log="$TMP_DIR/remote-build.log"
     if ! sed '1,2c\
 Bootstrap: docker\
 From: docker://eicweb/eic_xl:nightly' \
@@ -225,23 +213,39 @@ From: docker://eicweb/eic_xl:nightly' \
         echo "ERROR: could not prepare the remote build definition." >&2
         return 1
     fi
-    rm -f -- "$BUILD_IMAGE"
-    if "$CONTAINER_RUNTIME" build --remote --force \
-        "$BUILD_IMAGE" "$remote_definition"; then
-        return 0
-    fi
 
     print_green_block <<'EOF'
 
-ERROR: the remote SingularityCE build failed.
-If the error mentions a missing authentication token, run:
+=======================================================================
+LOCAL CONTAINER BUILD FAILED
+Trying the remote SingularityCE builder now.
+If it reports a missing authentication token, the login and retry commands
+will be printed after the error.
+=======================================================================
+EOF
+    rm -f -- "$BUILD_IMAGE"
+    if "$CONTAINER_RUNTIME" build --remote --force \
+        "$BUILD_IMAGE" "$remote_definition" 2>&1 | tee "$remote_log"; then
+        return 0
+    fi
+
+    if grep -Eiq 'no authentication token|log in with.*remote login|unauthorized|authentication token' "$remote_log"; then
+        print_green_block <<'EOF'
+
+ERROR: the remote build service rejected authentication.
+Sign in as this same user, then rerun the update:
   singularity remote login
-Then rerun:
   ./update.sh
-Otherwise, check the remote build service error above and confirm your
-Singularity Container Services account has remote-build access.
+EOF
+    else
+        print_green_block <<'EOF'
+
+ERROR: the remote build service did not produce a usable image.
+This is not an authentication-token error. Check the remote build job and
+its logs in your Singularity Container Services account for the cause.
 The previous working generator image, if any, has been preserved.
 EOF
+    fi
     return 1
 }
 
