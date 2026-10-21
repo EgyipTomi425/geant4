@@ -1,6 +1,6 @@
 # EIC Geant4 generator
 
-[![Validate generator](https://github.com/EgyipTomi425/geant4/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/EgyipTomi425/geant4/actions/workflows/validate.yml)
+[![Validate generator](https://github.com/EgyipTomi425/geant4/actions/workflows/validate.yml/badge.svg?branch=master)](https://github.com/EgyipTomi425/geant4/actions/workflows/validate.yml)
 
 This repository builds a portable SingularityCE image for running
 Geant4 simulations through the EIC XL software environment. The generated SIF
@@ -172,7 +172,7 @@ build before a large production run.
 
 GitHub Actions runs on Ubuntu 26.04. It performs Python/JSON/shell syntax
 checks, unit tests for config and job planning, and the default-config dry-run
-on pushes and pull requests. On pushes to `main` (and manual `workflow_dispatch`
+on pushes and pull requests. On pushes to `master` (and manual `workflow_dispatch`
 runs), it also builds the EIC container, runs the full default JSON
 configuration (8 jobs, 100 events each), and verifies that all ROOT and CSV
 outputs were created. If SingularityCE is missing, `update.sh` installs it.
