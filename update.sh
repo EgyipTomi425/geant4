@@ -250,13 +250,15 @@ PY
             ./mconfig --without-suid
         fi
         ./scripts/download-dependencies
-        local proot_makefile
-        proot_makefile="$(find "$apptainer_src" -path '*/PRoot-*/src/GNUmakefile' -print -quit)"
-        if [[ -z "$proot_makefile" ]]; then
-            echo "ERROR: could not find Apptainer's bundled PRoot GNUmakefile." >&2
-            exit 1
-        fi
-        /usr/bin/python3 - "$proot_makefile" <<'PY'
+        /usr/bin/python3 - ./scripts/compile-dependencies <<'PY'
+import pathlib
+import sys
+
+script = pathlib.Path(sys.argv[1])
+contents = script.read_text(encoding="utf-8")
+needle = '    case "$PKG" in\n'
+replacement = r'''    if [ "$PKG" = PRoot ]; then
+        /usr/bin/python3 - "src/GNUmakefile" <<'DISABLE_PROOT_PYTHON'
 import pathlib
 import sys
 
@@ -274,6 +276,15 @@ if not all(replaced.values()):
         f"Could not disable automatic Python-extension detection in {makefile}"
     )
 makefile.write_text("\n".join(lines) + "\n", encoding="utf-8")
+DISABLE_PROOT_PYTHON
+    fi
+    case "$PKG" in
+'''
+if contents.count(needle) != 1:
+    raise SystemExit(
+        f"Could not identify the dependency compile insertion point in {script}"
+    )
+script.write_text(contents.replace(needle, replacement, 1), encoding="utf-8")
 PY
         ./scripts/compile-dependencies
         local libexec_dir
