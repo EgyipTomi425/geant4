@@ -138,7 +138,7 @@ install_apptainer() {
         autoconf automake build-essential cryptsetup curl dh-apparmor fakeroot
         git libattr1-dev libfuse3-dev liblz4-dev liblzma-dev liblzo2-dev
         libprotobuf-c-dev libseccomp-dev libtalloc-dev libtool libzstd-dev
-        pkg-config proot python3 python3-dev squashfs-tools tzdata uidmap wget zlib1g-dev
+        pkg-config proot python3 squashfs-tools tzdata uidmap wget zlib1g-dev
     )
     local os_id os_version
     . /etc/os-release
@@ -168,7 +168,7 @@ install_apptainer() {
     echo "Looking up the latest stable Apptainer and Go releases..."
     wget -qO "$source_dir/apptainer-release.json" \
         https://api.github.com/repos/apptainer/apptainer/releases/latest
-    apptainer_tag="$(python3 - "$source_dir/apptainer-release.json" <<'PY'
+    apptainer_tag="$(/usr/bin/python3 - "$source_dir/apptainer-release.json" <<'PY'
 import json
 import sys
 
@@ -185,7 +185,7 @@ PY
 
     wget -qO "$source_dir/go-releases.json" \
         'https://go.dev/dl/?mode=json'
-    go_archive="$(python3 - "$source_dir/go-releases.json" "$go_arch" <<'PY'
+    go_archive="$(/usr/bin/python3 - "$source_dir/go-releases.json" "$go_arch" <<'PY'
 import json
 import sys
 
@@ -221,6 +221,7 @@ PY
         export PATH="$source_dir/go/bin:/usr/bin:/bin"
         unset CONDA_DEFAULT_ENV CONDA_PREFIX CONDA_PROMPT_MODIFIER
         unset LD_LIBRARY_PATH PYTHONHOME PYTHONPATH VIRTUAL_ENV
+        export WITHOUT_PYTHON=1
         ./mconfig --without-suid
         ./scripts/download-dependencies
         ./scripts/compile-dependencies

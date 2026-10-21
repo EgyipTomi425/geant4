@@ -39,8 +39,10 @@ and generated data remain outside the image.
   access and root or `sudo`. The apt package uses the version provided by the
   configured distribution repositories, which may not be the newest upstream
   release. The source build uses the distribution's Python development
-  libraries rather than inheriting an active Conda/virtualenv Python, and
-  checks that Apptainer's bundled helpers have their runtime libraries.
+  tools only for release metadata and disables PRoot's optional Python
+  extension, so its bundled helper does not link against an active
+  Conda/virtualenv Python. It also checks that Apptainer's bundled helpers
+  have their runtime libraries.
   Version discovery and installation happen only when Apptainer is
   absent; the updater does not automatically upgrade an existing installation.
   For image builds, a non-root invocation tries fakeroot, then `sudo`, then
