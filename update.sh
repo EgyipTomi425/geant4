@@ -222,6 +222,13 @@ PY
         ./mconfig --without-suid
         ./scripts/download-dependencies
         ./scripts/compile-dependencies
+        local libexec_dir
+        libexec_dir="$(sed -n 's/^LIBEXECDIR := //p' builddir/Makefile)"
+        if [[ -z "$libexec_dir" || "$libexec_dir" != /* ]]; then
+            echo "ERROR: could not determine Apptainer's absolute LIBEXECDIR from builddir/Makefile." >&2
+            exit 1
+        fi
+        run_privileged mkdir -p "$libexec_dir/apptainer/bin"
         run_privileged ./scripts/install-dependencies
         make -C builddir -j "$(nproc)"
         run_privileged make -C builddir install
