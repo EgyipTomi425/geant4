@@ -42,5 +42,5 @@
   "_comment_jobs": "Maximum parallel worker count. The runner caps it to the number of generated jobs, so 100 does not start 100 idle workers.",
   "_comment_runner_extensions": "detailed_shower and contributions are generator-runner extensions, not options in the original runner. detailed_shower enables step positions/lengths; contributions selects how the particles converter exports them.",
   "_comment_cli": "Explicit command-line options after the SIF path override the corresponding config values.",
-  "_comment_portability": "Place the config under the current working directory, home, or /tmp for Singularity's default binds. For another location, bind its directory with 'singularity run --bind <dir>:<dir>'; relative output paths resolve from the config directory."
+  "_comment_portability": "Place the config under the current working directory, home, or /tmp for Apptainer's default binds. For another location, bind its directory with 'apptainer run --bind <dir>:<dir>'; relative output paths resolve from the config directory."
 }

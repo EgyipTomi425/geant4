@@ -2,7 +2,7 @@
 
 [![Validate generator](https://github.com/EgyipTomi425/geant4/actions/workflows/validate.yml/badge.svg?branch=master)](https://github.com/EgyipTomi425/geant4/actions/workflows/validate.yml)
 
-This repository builds a portable SingularityCE image for running
+This repository builds a portable Apptainer image for running
 Geant4 simulations through the EIC XL software environment. The generated SIF
 contains the simulation runner and both ROOT-to-CSV converters. The JSON config
 and generated data remain outside the image.
@@ -11,7 +11,7 @@ and generated data remain outside the image.
 
 - `update.sh` downloads the current EIC XL nightly base SIF and builds the
   generator image on top of it.
-- `Singularity.def` installs the runner and converters inside the image and
+- `Apptainer.def` installs the runner and converters inside the image and
   selects the newest versioned EPIC detector setup available in that image at
   runtime.
 - `scripts/config.json` is the default simulation configuration.
@@ -25,31 +25,26 @@ and generated data remain outside the image.
 - `.github/workflows/validate.yml` runs the source/configuration checks on
   GitHub Actions.
 - `tests/` checks config interpretation, planned jobs, and MC-truth steering.
-- `singularity/` is generated locally and ignored by Git. It contains the
+- `apptainer/` is generated locally and ignored by Git. It contains the
   built SIF, a working copy of the config, and output folders.
 - `.build/` is a local cache for the base EIC image and is ignored by Git.
 
 ## Requirements
 
 - Linux on an architecture supported by the EIC XL image.
-- SingularityCE. If it is missing on Debian/Ubuntu, `update.sh` installs the
-  build dependencies and compiles the pinned SingularityCE release. This
+- Apptainer. If it is missing on Debian/Ubuntu, `update.sh` installs the
+  build dependencies and compiles the pinned Apptainer release. This
   requires network access and root or `sudo`. The updater first tries an
   unprivileged fakeroot build, then a `sudo` build, and finally an unprivileged
-  `proot` build. If all local methods fail, it tries the SingularityCE remote
-  build service. Remote builds require a Singularity Container Services
-  account and a prior `singularity remote login`. On Debian/Ubuntu the updater
-  installs `proot` if needed; installing packages requires root or `sudo`.
-  The remote fallback uses the EIC XL nightly OCI image directly and uploads
-  the repository's generator scripts as build context; it cannot honor a
-  custom local `--base-sif` image.
+  `proot` build. On Debian/Ubuntu the updater installs `proot` if needed;
+  installing packages requires root or `sudo`.
 - Network access to the EIC container registry for a normal update. The EIC XL
   nightly image is pulled from `docker://eicweb/eic_xl:nightly`.
 - Enough disk space for both the base and generator SIF images (each is several
   gigabytes).
 
 No EIC files outside this repository are required for a clean clone. `update.sh`
-creates `.build/` and `singularity/` as needed, installs SingularityCE if needed,
+creates `.build/` and `apptainer/` as needed, installs Apptainer if needed,
 and fetches the EIC base image itself. Python and the Geant/EIC Python
 environment are provided by the base image. `--base-sif` is only an optional
 override for an existing local base image; it is not needed for a normal
@@ -64,8 +59,8 @@ From the repository root:
 ```
 
 The script pulls the latest `eicweb/eic_xl:nightly` image, builds
-`singularity/geant-generator.sif`, and copies the default JSON config to
-`singularity/config.json` the first time. It preserves an existing config on
+`apptainer/geant-generator.sif`, and copies the default JSON config to
+`apptainer/config.json` the first time. It preserves an existing config on
 later updates. To deliberately restore the repository default config:
 
 ```bash
@@ -82,30 +77,16 @@ For an offline build or a local test using an existing compatible EIC image:
 
 Some containerized or cluster hosts disable the Linux user namespaces needed
 for local image builds. The updater automatically tries fakeroot, `sudo`, and
-`proot`; if those fail, it attempts a SingularityCE remote build. Remote
-building requires a Singularity Container Services account with remote-build
-access. Log in once as the same user who will run the updater:
-
-```bash
-singularity remote login
-./update.sh
-```
-
-The login command may ask for account credentials or a token in the terminal;
-do not put credentials in the repository or share them. The updater prints
-the login command only when the remote service reports an authentication
-error. If authentication succeeds but the remote builder fails or returns no
-image, it says this is a build-service failure and directs you to that job's
-logs instead of asking you to log in again. These instructions are highlighted
-in green in an interactive terminal; color is disabled when output is
-redirected or `NO_COLOR` is set. Without remote-build access, ask the host
-administrator to enable the required local build support or build on another
-machine.
+`proot`. If all fail, it prints a highlighted explanation and stops. `sudo`
+inside a container cannot override user-namespace restrictions imposed by
+the host kernel. Run the update on the Linux host, or ask the host
+administrator to enable Apptainer build/user-namespace support for the
+container.
 
 The downloaded base image is kept in `.build/eic_xl-nightly.sif`; it is a
 persistent cache and is not deleted after a successful build, so later updates
 can reuse it. It is ignored by Git. The generated image and config are kept in
-`singularity/`; that directory is also not committed. The updater removes its
+`apptainer/`; that directory is also not committed. The updater removes its
 per-run build temporary directory on both success and failure, and removes the
 `.build/tmp/` parent when it is empty. It stages the generator SIF separately
 and only replaces the existing image after a successful build, so a failed
@@ -115,26 +96,17 @@ the next update will download it again.
 
 Build temporary files default to `.build/tmp/`, keeping large image extraction
 and compression off potentially space-limited system temporary filesystems. Set
-`SINGULARITY_TMPDIR` before running `update.sh` to use another writable
+`APPTAINER_TMPDIR` before running `update.sh` to use another writable
 location; the updater creates and removes its own subdirectory there, leaving
-the user-selected directory and its other contents untouched. If a local build
-fails, the updater tries the SingularityCE remote build service after the local
-fallbacks. Remote builds use the EIC XL nightly OCI image and upload the
-generator scripts as build context. A custom local `--base-sif` cannot be used
-by this fallback. Sign in once before running the updater if the remote
-fallback may be needed:
-
-```bash
-singularity remote login
-```
+the user-selected directory and its other contents untouched.
 
 ## Run
 
-Run from the generated `singularity/` directory. The usual invocation names the
+Run from the generated `apptainer/` directory. The usual invocation names the
 local config explicitly:
 
 ```bash
-cd singularity
+cd apptainer
 ./geant-generator.sif --config ./config.json
 ```
 
@@ -153,14 +125,14 @@ cp config.json custom-config.json
 ```
 
 The config must be readable and its output directory must be writable from
-inside the container. Singularity normally binds the current working
+inside the container. Apptainer normally binds the current working
 directory, home, and `/tmp`. For a Slurm job or another external output path,
 bind it explicitly:
 
 ```bash
 OUTPUT_DIR="$PWD/slurm-output"
 mkdir -p "$OUTPUT_DIR"
-singularity run --bind "$OUTPUT_DIR:$OUTPUT_DIR" \
+apptainer run --bind "$OUTPUT_DIR:$OUTPUT_DIR" \
   ./geant-generator.sif --config ./config.json \
   --output-dir "$OUTPUT_DIR/csv" --roots-dir "$OUTPUT_DIR/roots"
 ```
@@ -219,20 +191,17 @@ checks, unit tests for config and job planning, and the default-config dry-run
 on pushes and pull requests. On pushes to `master` (and manual `workflow_dispatch`
 runs), it also builds the EIC container, runs the full default JSON
 configuration (8 jobs, 100 events each), and verifies that all ROOT and CSV
-outputs were created. If SingularityCE is missing, `update.sh` installs it.
+outputs were created. If Apptainer is missing, `update.sh` installs it.
 
 ## Troubleshooting
 
 - **No detector setup found:** rebuild from a valid EIC XL nightly image that
   includes a versioned EPIC detector installation.
 - **Permission denied while building:** the updater tries fakeroot, `sudo`,
-  and an unprivileged `proot` build, then tries the SingularityCE remote build
-  service. If the service reports a missing/invalid token, the updater prints
-  the `singularity remote login` and retry commands. Other remote failures,
-  including a build that returns no image, are identified separately; inspect
-  that job's logs in the Singularity Container Services account rather than
-  repeating login. If remote builds are unavailable, configure user namespaces
-  on the host or build outside the restricted container.
+  and an unprivileged `proot` build. If all fail, the host/container kernel is
+  blocking the required namespace operations; run the update on the host or
+  ask the host administrator to enable Apptainer build support. Container
+  `sudo` cannot override this restriction.
 - **Config not found:** run from a directory containing `config.json` or pass
   `--config`.
 - **Output or bind errors:** use a writable host path and bind it into the

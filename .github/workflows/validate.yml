@@ -37,15 +37,15 @@ jobs:
       - name: Build the generator image
         run: ./update.sh
       - name: Verify current-directory config discovery
-        working-directory: singularity
+        working-directory: apptainer
         run: ./geant-generator.sif --dry-run
       - name: Run all jobs from the default JSON config
-        working-directory: singularity
+        working-directory: apptainer
         run: ./geant-generator.sif --config ./config.json --jobs 2
       - name: Verify generated ROOT and CSV files
         run: |
-          root_count="$(find singularity/output/roots -type f -name '*.root' | wc -l)"
-          csv_count="$(find singularity/output/csv -type f -name '*.csv' | wc -l)"
+          root_count="$(find apptainer/output/roots -type f -name '*.root' | wc -l)"
+          csv_count="$(find apptainer/output/csv -type f -name '*.csv' | wc -l)"
           test "$root_count" -eq 8 || {
             echo "Expected 8 ROOT files, found $root_count" >&2
             exit 1

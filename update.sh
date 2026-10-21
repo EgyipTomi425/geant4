@@ -4,17 +4,17 @@ set -euo pipefail
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$ROOT_DIR/.build"
 BASE_IMAGE="$BUILD_DIR/eic_xl-nightly.sif"
-OUTPUT_DIR="$ROOT_DIR/singularity"
-TMP_DIR_PARENT="${SINGULARITY_TMPDIR:-$BUILD_DIR/tmp}"
+OUTPUT_DIR="$ROOT_DIR/apptainer"
+TMP_DIR_PARENT="${APPTAINER_TMPDIR:-$BUILD_DIR/tmp}"
 CLEAN_TMP_PARENT=false
-if [[ -z "${SINGULARITY_TMPDIR:-}" ]]; then
+if [[ -z "${APPTAINER_TMPDIR:-}" ]]; then
     CLEAN_TMP_PARENT=true
 fi
 TMP_DIR=""
 BUILD_IMAGE="$OUTPUT_DIR/.geant-generator.sif.tmp.$$"
 RESET_CONFIG=false
 LOCAL_BASE=""
-SINGULARITY_CE_VERSION="4.6.0"
+APPTAINER_VERSION="1.5.4"
 GO_VERSION="1.27.1"
 
 usage() {
@@ -30,7 +30,7 @@ docker://eicweb/eic_xl:nightly, then builds the generator SIF.
 Options:
   --base-sif PATH   Use an existing local EIC SIF instead of pulling one.
                     Useful for offline builds and testing.
-  --reset-config    Replace singularity/config.json with scripts/config.json.
+  --reset-config    Replace apptainer/config.json with scripts/config.json.
                     Without this, an existing config is preserved.
   -h, --help        Show this help.
 EOF
@@ -86,7 +86,7 @@ print_green_block() {
 mkdir -p "$BUILD_DIR" "$OUTPUT_DIR/output" "$TMP_DIR_PARENT"
 TMP_DIR="$(mktemp -d "$TMP_DIR_PARENT/geant-generator.XXXXXX")"
 export TMPDIR="$TMP_DIR"
-export SINGULARITY_TMPDIR="$TMP_DIR"
+export APPTAINER_TMPDIR="$TMP_DIR"
 
 cleanup_temporary_files() {
     local exit_status=$?
@@ -110,22 +110,30 @@ cleanup_temporary_files() {
 }
 trap cleanup_temporary_files EXIT
 
-install_singularity_ce() {
+install_apptainer() {
     if ! command -v apt-get >/dev/null 2>&1 \
         || ! grep -Eq '^ID=(ubuntu|debian)$' /etc/os-release; then
-        echo "ERROR: automatic SingularityCE installation supports Debian/Ubuntu only. Install SingularityCE and rerun." >&2
+        echo "ERROR: automatic Apptainer installation supports Debian/Ubuntu only. Install Apptainer and rerun." >&2
         return 1
     fi
 
-    echo "SingularityCE not found; installing its build dependencies..."
+    echo "Apptainer not found; installing its build dependencies..."
     run_privileged apt-get update
     local packages=(
-        autoconf automake build-essential cryptsetup fuse2fs fuse libfuse-dev
-        libseccomp-dev libtool pkg-config proot runc squashfs-tools
-        squashfs-tools-ng uidmap wget zlib1g-dev
+        autoconf automake build-essential cryptsetup curl dh-apparmor fakeroot
+        git libattr1-dev libfuse3-dev liblz4-dev liblzma-dev liblzo2-dev
+        libprotobuf-c-dev libseccomp-dev libtalloc-dev libtool libzstd-dev
+        pkg-config proot squashfs-tools tzdata uidmap wget zlib1g-dev
     )
-    if grep -qx 'ID=ubuntu' /etc/os-release \
-        && dpkg --compare-versions "$(. /etc/os-release && printf '%s' "$VERSION_ID")" ge 24.04; then
+    local os_id os_version
+    . /etc/os-release
+    os_id="$ID"
+    os_version="$VERSION_ID"
+    if [[ "$os_id" == ubuntu ]] \
+        && dpkg --compare-versions "$os_version" ge 24.04; then
+        packages+=(libsubid-dev)
+    elif [[ "$os_id" == debian ]] \
+        && dpkg --compare-versions "$os_version" ge 12; then
         packages+=(libsubid-dev)
     fi
     run_privileged apt-get install -y --no-install-recommends "${packages[@]}"
@@ -140,20 +148,23 @@ install_singularity_ce() {
             ;;
     esac
 
-    local source_dir="$TMP_DIR/singularity-ce-install"
-    local singularity_src="$source_dir/singularity-ce-$SINGULARITY_CE_VERSION"
+    local source_dir="$TMP_DIR/apptainer-install"
+    local apptainer_src="$source_dir/apptainer-$APPTAINER_VERSION"
     mkdir -p "$source_dir"
     wget -O "$source_dir/go.tar.gz" \
         "https://go.dev/dl/go${GO_VERSION}.linux-${go_arch}.tar.gz"
     tar -xzf "$source_dir/go.tar.gz" -C "$source_dir"
-    wget -O "$source_dir/singularity-ce.tar.gz" \
-        "https://github.com/sylabs/singularity/releases/download/v${SINGULARITY_CE_VERSION}/singularity-ce-${SINGULARITY_CE_VERSION}.tar.gz"
-    tar -xzf "$source_dir/singularity-ce.tar.gz" -C "$source_dir"
+    wget -O "$source_dir/apptainer.tar.gz" \
+        "https://github.com/apptainer/apptainer/releases/download/v${APPTAINER_VERSION}/apptainer-${APPTAINER_VERSION}.tar.gz"
+    tar -xzf "$source_dir/apptainer.tar.gz" -C "$source_dir"
 
     (
-        cd "$singularity_src"
+        cd "$apptainer_src"
         export PATH="$source_dir/go/bin:$PATH"
         ./mconfig
+        ./scripts/download-dependencies
+        ./scripts/compile-dependencies
+        run_privileged ./scripts/install-dependencies
         make -C builddir -j "$(nproc)"
         run_privileged make -C builddir install
     )
@@ -190,73 +201,35 @@ try_proot_build() {
         return 1
     fi
     rm -f -- "$BUILD_IMAGE"
-    echo "Trying an unprivileged SingularityCE build with proot..."
-    if "$CONTAINER_RUNTIME" build --force "$BUILD_IMAGE" Singularity.def; then
+    echo "Trying an unprivileged Apptainer build with proot..."
+    if "$CONTAINER_RUNTIME" build --force "$BUILD_IMAGE" Apptainer.def; then
         return 0
     fi
     return 1
 }
 
-try_remote_build() {
-    if [[ -n "$LOCAL_BASE" ]]; then
-        echo "ERROR: remote build cannot use the local --base-sif override." >&2
-        return 1
-    fi
-
-    echo "Trying the SingularityCE remote build service..."
-    local remote_definition="$TMP_DIR/Singularity.remote.def"
-    local remote_log="$TMP_DIR/remote-build.log"
-    if ! sed '1,2c\
-Bootstrap: docker\
-From: docker://eicweb/eic_xl:nightly' \
-        Singularity.def > "$remote_definition"; then
-        echo "ERROR: could not prepare the remote build definition." >&2
-        return 1
-    fi
-
+report_local_build_failure() {
     print_green_block <<'EOF'
 
-=======================================================================
-LOCAL CONTAINER BUILD FAILED
-Trying the remote SingularityCE builder now.
-If it reports a missing authentication token, the login and retry commands
-will be printed after the error.
-=======================================================================
-EOF
-    rm -f -- "$BUILD_IMAGE"
-    if "$CONTAINER_RUNTIME" build --remote --force \
-        "$BUILD_IMAGE" "$remote_definition" 2>&1 | tee "$remote_log"; then
-        return 0
-    fi
+ERROR: all local Apptainer build methods failed.
+If the errors above mention user namespaces or "Operation not permitted",
+this host/container blocks kernel operations required for the build. Sudo
+inside a container cannot override that host restriction.
 
-    if grep -Eiq 'no authentication token|log in with.*remote login|unauthorized|authentication token' "$remote_log"; then
-        print_green_block <<'EOF'
-
-ERROR: the remote build service rejected authentication.
-Sign in as this same user, then rerun the update:
-  singularity remote login
-  ./update.sh
-EOF
-    else
-        print_green_block <<'EOF'
-
-ERROR: the remote build service did not produce a usable image.
-This is not an authentication-token error. Check the remote build job and
-its logs in your Singularity Container Services account for the cause.
+Run this update on the Linux host, or ask the host administrator to enable
+Apptainer build/user-namespace support for this container.
 The previous working generator image, if any, has been preserved.
 EOF
-    fi
-    return 1
 }
 
-if ! command -v singularity >/dev/null 2>&1; then
-    install_singularity_ce
+if ! command -v apptainer >/dev/null 2>&1; then
+    install_apptainer
 fi
-if ! command -v singularity >/dev/null 2>&1; then
-    echo "ERROR: SingularityCE installation did not provide a singularity command." >&2
+if ! command -v apptainer >/dev/null 2>&1; then
+    echo "ERROR: Apptainer installation did not provide an apptainer command." >&2
     exit 1
 fi
-CONTAINER_RUNTIME="$(command -v singularity)"
+CONTAINER_RUNTIME="$(command -v apptainer)"
 
 if [[ -n "$LOCAL_BASE" ]]; then
     LOCAL_BASE="$(realpath -- "$LOCAL_BASE")"
@@ -284,20 +257,18 @@ fi
 echo "Building generator image with $CONTAINER_RUNTIME..."
 cd "$ROOT_DIR"
 if ((EUID == 0)); then
-    if ! "$CONTAINER_RUNTIME" build --force "$BUILD_IMAGE" Singularity.def; then
+    if ! "$CONTAINER_RUNTIME" build --force "$BUILD_IMAGE" Apptainer.def; then
         echo "Privileged local build failed; trying an unprivileged proot build."
         if ! try_proot_build; then
             echo "Local proot build failed."
-            try_remote_build || {
-                echo "ERROR: local and remote build attempts failed." >&2
-                exit 1
-            }
+            report_local_build_failure
+            exit 1
         fi
     fi
 else
     echo "Trying an unprivileged fakeroot build..."
     if "$CONTAINER_RUNTIME" build --fakeroot --force \
-        "$BUILD_IMAGE" Singularity.def; then
+        "$BUILD_IMAGE" Apptainer.def; then
         :
     else
         echo "Fakeroot build failed or is unavailable."
@@ -306,9 +277,9 @@ else
             echo "Falling back to a sudo build..."
             rm -f -- "$BUILD_IMAGE"
             if sudo env TMPDIR="$TMPDIR" \
-                SINGULARITY_TMPDIR="$SINGULARITY_TMPDIR" \
+                APPTAINER_TMPDIR="$APPTAINER_TMPDIR" \
                 "$CONTAINER_RUNTIME" build --force \
-                "$BUILD_IMAGE" Singularity.def; then
+                "$BUILD_IMAGE" Apptainer.def; then
                 sudo chown "$(id -u):$(id -g)" "$BUILD_IMAGE"
                 sudo_build_succeeded=true
             else
@@ -319,11 +290,9 @@ else
         fi
         if [[ "$sudo_build_succeeded" == false ]]; then
             if ! try_proot_build; then
-                echo "Local proot build failed; trying the SingularityCE remote build service."
-                if ! try_remote_build; then
-                    echo "ERROR: local fakeroot, sudo, proot, and remote builds all failed." >&2
-                    exit 1
-                fi
+                echo "Local proot build failed."
+                report_local_build_failure
+                exit 1
             fi
         fi
     fi

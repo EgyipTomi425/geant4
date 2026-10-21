@@ -62,5 +62,5 @@ From: .build/eic_xl-nightly.sif
 
 %help
     Self-contained EIC Geant generator runner.
-    Usage: singularity run geant-generator.sif [config.json | --config config.json] [runner options]
+    Usage: apptainer run geant-generator.sif [config.json | --config config.json] [runner options]
     Without a config argument, ./config.json in the current directory is used.
