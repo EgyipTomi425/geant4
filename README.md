@@ -70,6 +70,11 @@ The downloaded base image is kept in `.build/eic_xl-nightly.sif`; it is not
 committed. The generated image and config are kept in `singularity/`; that
 directory is also not committed.
 
+Build temporary files default to `.build/tmp/`, keeping large image extraction
+and compression off potentially space-limited system temporary filesystems. Set
+`APPTAINER_TMPDIR` or `SINGULARITY_TMPDIR` before running `update.sh` to use a
+different writable location.
+
 ## Run
 
 The default config is discovered next to the SIF:

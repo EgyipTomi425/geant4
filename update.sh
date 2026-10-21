@@ -5,6 +5,7 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$ROOT_DIR/.build"
 BASE_IMAGE="$BUILD_DIR/eic_xl-nightly.sif"
 OUTPUT_DIR="$ROOT_DIR/singularity"
+TMP_DIR="${APPTAINER_TMPDIR:-${SINGULARITY_TMPDIR:-$BUILD_DIR/tmp}}"
 RESET_CONFIG=false
 LOCAL_BASE=""
 
@@ -63,6 +64,10 @@ else
 fi
 
 mkdir -p "$BUILD_DIR" "$OUTPUT_DIR/output"
+mkdir -p "$TMP_DIR"
+export TMPDIR="$TMP_DIR"
+export APPTAINER_TMPDIR="$TMP_DIR"
+export SINGULARITY_TMPDIR="$TMP_DIR"
 
 if [[ -n "$LOCAL_BASE" ]]; then
     LOCAL_BASE="$(realpath -- "$LOCAL_BASE")"
@@ -103,7 +108,10 @@ else
             exit 1
         fi
         rm -f -- "$OUTPUT_DIR/geant-generator.sif"
-        sudo "$CONTAINER_RUNTIME" build --force \
+        sudo env TMPDIR="$TMPDIR" \
+            APPTAINER_TMPDIR="$APPTAINER_TMPDIR" \
+            SINGULARITY_TMPDIR="$SINGULARITY_TMPDIR" \
+            "$CONTAINER_RUNTIME" build --force \
             "$OUTPUT_DIR/geant-generator.sif" Singularity.def
     fi
 fi
