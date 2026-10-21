@@ -73,7 +73,8 @@ directory is also not committed.
 Build temporary files default to `.build/tmp/`, keeping large image extraction
 and compression off potentially space-limited system temporary filesystems. Set
 `APPTAINER_TMPDIR` or `SINGULARITY_TMPDIR` before running `update.sh` to use a
-different writable location.
+different writable location. The default temporary directory is removed after a
+successful build; a user-selected directory is left untouched.
 
 ## Run
 

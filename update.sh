@@ -6,6 +6,10 @@ BUILD_DIR="$ROOT_DIR/.build"
 BASE_IMAGE="$BUILD_DIR/eic_xl-nightly.sif"
 OUTPUT_DIR="$ROOT_DIR/singularity"
 TMP_DIR="${APPTAINER_TMPDIR:-${SINGULARITY_TMPDIR:-$BUILD_DIR/tmp}}"
+CLEAN_TMP_DIR=false
+if [[ -z "${APPTAINER_TMPDIR:-}" && -z "${SINGULARITY_TMPDIR:-}" ]]; then
+    CLEAN_TMP_DIR=true
+fi
 RESET_CONFIG=false
 LOCAL_BASE=""
 
@@ -68,6 +72,14 @@ mkdir -p "$TMP_DIR"
 export TMPDIR="$TMP_DIR"
 export APPTAINER_TMPDIR="$TMP_DIR"
 export SINGULARITY_TMPDIR="$TMP_DIR"
+
+cleanup_tmp_dir() {
+    local exit_status=$?
+    if [[ "$CLEAN_TMP_DIR" == true && "$exit_status" -eq 0 ]]; then
+        rmdir -- "$TMP_DIR"
+    fi
+}
+trap cleanup_tmp_dir EXIT
 
 if [[ -n "$LOCAL_BASE" ]]; then
     LOCAL_BASE="$(realpath -- "$LOCAL_BASE")"
