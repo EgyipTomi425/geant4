@@ -66,7 +66,7 @@ run_privileged() {
     elif command -v sudo >/dev/null 2>&1; then
         sudo "$@"
     else
-        echo "ERROR: installing SingularityCE requires root or sudo." >&2
+        echo "ERROR: installing system packages requires root or sudo." >&2
         return 1
     fi
 }
@@ -94,8 +94,8 @@ install_singularity_ce() {
     run_privileged apt-get update
     local packages=(
         autoconf automake build-essential cryptsetup fuse2fs fuse libfuse-dev
-        libseccomp-dev libtool pkg-config runc squashfs-tools squashfs-tools-ng
-        uidmap wget zlib1g-dev
+        libseccomp-dev libtool pkg-config proot runc squashfs-tools
+        squashfs-tools-ng uidmap wget zlib1g-dev
     )
     if grep -qx 'ID=ubuntu' /etc/os-release \
         && dpkg --compare-versions "$(. /etc/os-release && printf '%s' "$VERSION_ID")" ge 24.04; then
@@ -131,6 +131,25 @@ install_singularity_ce() {
         run_privileged make -C builddir install
     )
     rm -rf -- "$source_dir"
+}
+
+install_proot() {
+    if command -v proot >/dev/null 2>&1; then
+        return
+    fi
+    if ! command -v apt-get >/dev/null 2>&1 \
+        || ! grep -Eq '^ID=(ubuntu|debian)$' /etc/os-release; then
+        echo "ERROR: proot is required for the unprivileged build fallback. Install proot and rerun." >&2
+        return 1
+    fi
+
+    echo "proot not found; installing it for the unprivileged build fallback..."
+    run_privileged apt-get update
+    run_privileged apt-get install -y --no-install-recommends proot
+    if ! command -v proot >/dev/null 2>&1; then
+        echo "ERROR: proot installation did not provide a proot command." >&2
+        return 1
+    fi
 }
 
 if ! command -v singularity >/dev/null 2>&1; then
@@ -175,16 +194,29 @@ else
         "$OUTPUT_DIR/geant-generator.sif" Singularity.def; then
         :
     else
-        echo "Fakeroot build failed or is unavailable; falling back to sudo."
-        if ! command -v sudo >/dev/null 2>&1; then
-            echo "ERROR: fakeroot build failed and sudo is not installed." >&2
-            exit 1
+        echo "Fakeroot build failed or is unavailable."
+        sudo_build_succeeded=false
+        if command -v sudo >/dev/null 2>&1; then
+            echo "Falling back to a sudo build..."
+            rm -f -- "$OUTPUT_DIR/geant-generator.sif"
+            if sudo env TMPDIR="$TMPDIR" \
+                SINGULARITY_TMPDIR="$SINGULARITY_TMPDIR" \
+                "$CONTAINER_RUNTIME" build --force \
+                "$OUTPUT_DIR/geant-generator.sif" Singularity.def; then
+                sudo_build_succeeded=true
+            else
+                echo "Sudo build failed; trying an unprivileged proot build."
+            fi
+        else
+            echo "sudo is unavailable; trying an unprivileged proot build."
         fi
-        rm -f -- "$OUTPUT_DIR/geant-generator.sif"
-        sudo env TMPDIR="$TMPDIR" \
-            SINGULARITY_TMPDIR="$SINGULARITY_TMPDIR" \
+        if [[ "$sudo_build_succeeded" == false ]]; then
+            install_proot
+            rm -f -- "$OUTPUT_DIR/geant-generator.sif"
+            echo "Trying an unprivileged SingularityCE build with proot..."
             "$CONTAINER_RUNTIME" build --force \
-            "$OUTPUT_DIR/geant-generator.sif" Singularity.def
+                "$OUTPUT_DIR/geant-generator.sif" Singularity.def
+        fi
     fi
 fi
 chmod +x "$OUTPUT_DIR/geant-generator.sif"

@@ -35,7 +35,9 @@ and generated data remain outside the image.
 - SingularityCE. If it is missing on Debian/Ubuntu, `update.sh` installs the
   build dependencies and compiles the pinned SingularityCE release. This
   requires network access and root or `sudo`. The updater first tries an
-  unprivileged fakeroot build, then falls back to `sudo` when needed.
+  unprivileged fakeroot build, then a `sudo` build, and finally an unprivileged
+  `proot` build. On Debian/Ubuntu it installs `proot` if needed; installing
+  packages requires root or `sudo`.
 - Network access to the EIC container registry for a normal update. The EIC XL
   nightly image is pulled from `docker://eicweb/eic_xl:nightly`.
 - Enough disk space for both the base and generator SIF images (each is several
@@ -181,8 +183,9 @@ outputs were created. If SingularityCE is missing, `update.sh` installs it.
 
 - **No detector setup found:** rebuild from a valid EIC XL nightly image that
   includes a versioned EPIC detector installation.
-- **Permission denied while building:** configure Singularity fakeroot support
-  or use an account authorized to build images with `sudo`.
+- **Permission denied while building:** the updater tries fakeroot, `sudo`,
+  and an unprivileged `proot` build in order. If all fail, configure user
+  namespaces on the host or build outside the restricted container.
 - **Config not found:** run from a directory containing `config.json` or pass
   `--config`.
 - **Output or bind errors:** use a writable host path and bind it into the
