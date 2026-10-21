@@ -5,13 +5,15 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$ROOT_DIR/.build"
 BASE_IMAGE="$BUILD_DIR/eic_xl-nightly.sif"
 OUTPUT_DIR="$ROOT_DIR/singularity"
-TMP_DIR="${APPTAINER_TMPDIR:-${SINGULARITY_TMPDIR:-$BUILD_DIR/tmp}}"
+TMP_DIR="${SINGULARITY_TMPDIR:-$BUILD_DIR/tmp}"
 CLEAN_TMP_DIR=false
-if [[ -z "${APPTAINER_TMPDIR:-}" && -z "${SINGULARITY_TMPDIR:-}" ]]; then
+if [[ -z "${SINGULARITY_TMPDIR:-}" ]]; then
     CLEAN_TMP_DIR=true
 fi
 RESET_CONFIG=false
 LOCAL_BASE=""
+SINGULARITY_CE_VERSION="4.6.0"
+GO_VERSION="1.27.1"
 
 usage() {
     cat <<'EOF'
@@ -64,44 +66,13 @@ run_privileged() {
     elif command -v sudo >/dev/null 2>&1; then
         sudo "$@"
     else
-        echo "ERROR: installing Apptainer requires root or sudo." >&2
+        echo "ERROR: installing SingularityCE requires root or sudo." >&2
         return 1
     fi
 }
 
-if ! command -v apptainer >/dev/null 2>&1 \
-    && ! command -v singularity >/dev/null 2>&1; then
-    echo "Apptainer/Singularity not found; attempting to install Apptainer..."
-    if command -v apt-get >/dev/null 2>&1; then
-        run_privileged apt-get update
-        run_privileged apt-get install -y apptainer
-    elif command -v dnf >/dev/null 2>&1; then
-        run_privileged dnf install -y apptainer
-    elif command -v yum >/dev/null 2>&1; then
-        run_privileged yum install -y apptainer
-    elif command -v zypper >/dev/null 2>&1; then
-        run_privileged zypper --non-interactive install apptainer
-    elif command -v pacman >/dev/null 2>&1; then
-        run_privileged pacman --noconfirm -S apptainer
-    else
-        echo "ERROR: no supported package manager found. Install Apptainer or Singularity, then rerun." >&2
-        exit 1
-    fi
-fi
-
-if command -v apptainer >/dev/null 2>&1; then
-    CONTAINER_RUNTIME="$(command -v apptainer)"
-elif command -v singularity >/dev/null 2>&1; then
-    CONTAINER_RUNTIME="$(command -v singularity)"
-else
-    echo "ERROR: Apptainer installation did not provide an apptainer command." >&2
-    exit 1
-fi
-
-mkdir -p "$BUILD_DIR" "$OUTPUT_DIR/output"
-mkdir -p "$TMP_DIR"
+mkdir -p "$BUILD_DIR" "$OUTPUT_DIR/output" "$TMP_DIR"
 export TMPDIR="$TMP_DIR"
-export APPTAINER_TMPDIR="$TMP_DIR"
 export SINGULARITY_TMPDIR="$TMP_DIR"
 
 cleanup_tmp_dir() {
@@ -111,6 +82,65 @@ cleanup_tmp_dir() {
     fi
 }
 trap cleanup_tmp_dir EXIT
+
+install_singularity_ce() {
+    if ! command -v apt-get >/dev/null 2>&1 \
+        || ! grep -Eq '^ID=(ubuntu|debian)$' /etc/os-release; then
+        echo "ERROR: automatic SingularityCE installation supports Debian/Ubuntu only. Install SingularityCE and rerun." >&2
+        return 1
+    fi
+
+    echo "SingularityCE not found; installing its build dependencies..."
+    run_privileged apt-get update
+    local packages=(
+        autoconf automake build-essential cryptsetup fuse2fs fuse libfuse-dev
+        libseccomp-dev libtool pkg-config runc squashfs-tools squashfs-tools-ng
+        uidmap wget zlib1g-dev
+    )
+    if grep -qx 'ID=ubuntu' /etc/os-release \
+        && dpkg --compare-versions "$(. /etc/os-release && printf '%s' "$VERSION_ID")" ge 24.04; then
+        packages+=(libsubid-dev)
+    fi
+    run_privileged apt-get install -y --no-install-recommends "${packages[@]}"
+
+    local go_arch
+    case "$(uname -m)" in
+        x86_64) go_arch="amd64" ;;
+        aarch64|arm64) go_arch="arm64" ;;
+        *)
+            echo "ERROR: unsupported architecture for automatic Go installation: $(uname -m)" >&2
+            return 1
+            ;;
+    esac
+
+    local source_dir="$TMP_DIR/singularity-ce-install"
+    local singularity_src="$source_dir/singularity-ce-$SINGULARITY_CE_VERSION"
+    mkdir -p "$source_dir"
+    wget -O "$source_dir/go.tar.gz" \
+        "https://go.dev/dl/go${GO_VERSION}.linux-${go_arch}.tar.gz"
+    tar -xzf "$source_dir/go.tar.gz" -C "$source_dir"
+    wget -O "$source_dir/singularity-ce.tar.gz" \
+        "https://github.com/sylabs/singularity/releases/download/v${SINGULARITY_CE_VERSION}/singularity-ce-${SINGULARITY_CE_VERSION}.tar.gz"
+    tar -xzf "$source_dir/singularity-ce.tar.gz" -C "$source_dir"
+
+    (
+        cd "$singularity_src"
+        export PATH="$source_dir/go/bin:$PATH"
+        ./mconfig
+        make -C builddir -j "$(nproc)"
+        run_privileged make -C builddir install
+    )
+    rm -rf -- "$source_dir"
+}
+
+if ! command -v singularity >/dev/null 2>&1; then
+    install_singularity_ce
+fi
+if ! command -v singularity >/dev/null 2>&1; then
+    echo "ERROR: SingularityCE installation did not provide a singularity command." >&2
+    exit 1
+fi
+CONTAINER_RUNTIME="$(command -v singularity)"
 
 if [[ -n "$LOCAL_BASE" ]]; then
     LOCAL_BASE="$(realpath -- "$LOCAL_BASE")"
@@ -152,7 +182,6 @@ else
         fi
         rm -f -- "$OUTPUT_DIR/geant-generator.sif"
         sudo env TMPDIR="$TMPDIR" \
-            APPTAINER_TMPDIR="$APPTAINER_TMPDIR" \
             SINGULARITY_TMPDIR="$SINGULARITY_TMPDIR" \
             "$CONTAINER_RUNTIME" build --force \
             "$OUTPUT_DIR/geant-generator.sif" Singularity.def

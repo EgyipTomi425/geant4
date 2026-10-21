@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,14 +30,18 @@ jobs:
   simulation-integration:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     needs: validate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
       - name: Build the generator image
         run: ./update.sh
+      - name: Verify current-directory config discovery
+        working-directory: singularity
+        run: ./geant-generator.sif --dry-run
       - name: Run all jobs from the default JSON config
-        run: ./singularity/geant-generator.sif --config ./singularity/config.json --jobs 2
+        working-directory: singularity
+        run: ./geant-generator.sif --config ./config.json --jobs 2
       - name: Verify generated ROOT and CSV files
         run: |
           root_count="$(find singularity/output/roots -type f -name '*.root' | wc -l)"

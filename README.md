@@ -2,7 +2,7 @@
 
 [![Validate generator](https://github.com/EgyipTomi425/geant4/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/EgyipTomi425/geant4/actions/workflows/validate.yml)
 
-This repository builds a portable Singularity/Apptainer image for running
+This repository builds a portable SingularityCE image for running
 Geant4 simulations through the EIC XL software environment. The generated SIF
 contains the simulation runner and both ROOT-to-CSV converters. The JSON config
 and generated data remain outside the image.
@@ -32,20 +32,21 @@ and generated data remain outside the image.
 ## Requirements
 
 - Linux on an architecture supported by the EIC XL image.
-- Apptainer or Singularity. If neither is installed, `update.sh` attempts to
-  install Apptainer using the system package manager (apt, dnf, yum, zypper, or
-  pacman); this requires root or `sudo`. It first tries an unprivileged fakeroot
-  build, then falls back to `sudo` when needed.
+- SingularityCE. If it is missing on Debian/Ubuntu, `update.sh` installs the
+  build dependencies and compiles the pinned SingularityCE release. This
+  requires network access and root or `sudo`. The updater first tries an
+  unprivileged fakeroot build, then falls back to `sudo` when needed.
 - Network access to the EIC container registry for a normal update. The EIC XL
   nightly image is pulled from `docker://eicweb/eic_xl:nightly`.
 - Enough disk space for both the base and generator SIF images (each is several
   gigabytes).
 
 No EIC files outside this repository are required for a clean clone. `update.sh`
-creates `.build/` and `singularity/` as needed, installs Apptainer if needed, and
-fetches the EIC base image itself. Python and the Geant/EIC Python environment
-are provided by the base image. `--base-sif` is only an optional override for an
-existing local base image; it is not needed for the normal fresh-clone workflow.
+creates `.build/` and `singularity/` as needed, installs SingularityCE if needed,
+and fetches the EIC base image itself. Python and the Geant/EIC Python
+environment are provided by the base image. `--base-sif` is only an optional
+override for an existing local base image; it is not needed for a normal
+fresh-clone build.
 
 ## Build or update
 
@@ -67,49 +68,57 @@ later updates. To deliberately restore the repository default config:
 For an offline build or a local test using an existing compatible EIC image:
 
 ```bash
-./update.sh --base-sif /path/to/eic_xl-nightly.sif
+./update.sh --base-sif "$HOME/eic_xl-nightly.sif"
 ```
 
-The downloaded base image is kept in `.build/eic_xl-nightly.sif`; it is not
-committed. The generated image and config are kept in `singularity/`; that
-directory is also not committed.
+The downloaded base image is kept in `.build/eic_xl-nightly.sif`; it is a
+persistent cache and is not deleted after a successful build, so later updates
+can reuse it. It is ignored by Git. The generated image and config are kept in
+`singularity/`; that directory is also not committed. Only the temporary
+`.build/tmp/` directory is removed after a successful build. To reclaim the base
+image's disk space manually, remove `.build/eic_xl-nightly.sif`; the next update
+will download it again.
 
 Build temporary files default to `.build/tmp/`, keeping large image extraction
 and compression off potentially space-limited system temporary filesystems. Set
-`APPTAINER_TMPDIR` or `SINGULARITY_TMPDIR` before running `update.sh` to use a
-different writable location. The default temporary directory is removed after a
-successful build; a user-selected directory is left untouched.
+`SINGULARITY_TMPDIR` before running `update.sh` to use another writable
+location; a user-selected directory is left untouched.
 
 ## Run
 
-The default config is discovered next to the SIF:
+Run from the generated `singularity/` directory. The usual invocation names the
+local config explicitly:
 
 ```bash
 cd singularity
-./geant-generator.sif
+./geant-generator.sif --config ./config.json
 ```
 
-Preview the jobs without running simulations:
+Without `--config`, the container also looks for `./config.json` in the current
+working directory. Preview the jobs without running simulations:
 
 ```bash
 ./geant-generator.sif --dry-run
 ```
 
-Use another config:
+Use another config from the current directory:
 
 ```bash
-./geant-generator.sif --config /path/to/config.json
+cp config.json custom-config.json
+./geant-generator.sif --config ./custom-config.json
 ```
 
 The config must be readable and its output directory must be writable from
-inside the container. Singularity/Apptainer normally binds the current working
-directory, home, and `/tmp`. Bind other host directories explicitly, for
-example:
+inside the container. Singularity normally binds the current working
+directory, home, and `/tmp`. For a Slurm job or another external output path,
+bind it explicitly:
 
 ```bash
-apptainer run --bind /data/simulations:/data/simulations \
-  /path/to/geant-generator.sif \
-  --config /data/simulations/config.json
+OUTPUT_DIR="$PWD/slurm-output"
+mkdir -p "$OUTPUT_DIR"
+singularity run --bind "$OUTPUT_DIR:$OUTPUT_DIR" \
+  ./geant-generator.sif --config ./config.json \
+  --output-dir "$OUTPUT_DIR/csv" --roots-dir "$OUTPUT_DIR/roots"
 ```
 
 Relative `output_dir`, `roots_dir`, and `work_dir` paths are resolved relative
@@ -161,20 +170,21 @@ build before a large production run.
 
 ## Continuous integration
 
-GitHub Actions runs Python/JSON/shell syntax checks, unit tests for config and
-job planning, and the default-config dry-run on pushes and pull requests. On
-pushes to `main` (and manual `workflow_dispatch` runs), it also builds the EIC
-container, runs the full default JSON configuration (8 jobs, 100 events each),
-and verifies that all ROOT and CSV outputs were created. The integration job
-installs Apptainer through `update.sh` if it is not already available.
+GitHub Actions runs on Ubuntu 26.04. It performs Python/JSON/shell syntax
+checks, unit tests for config and job planning, and the default-config dry-run
+on pushes and pull requests. On pushes to `main` (and manual `workflow_dispatch`
+runs), it also builds the EIC container, runs the full default JSON
+configuration (8 jobs, 100 events each), and verifies that all ROOT and CSV
+outputs were created. If SingularityCE is missing, `update.sh` installs it.
 
 ## Troubleshooting
 
 - **No detector setup found:** rebuild from a valid EIC XL nightly image that
   includes a versioned EPIC detector installation.
-- **Permission denied while building:** configure Apptainer/Singularity
-  fakeroot support, or use an account authorized to build images with `sudo`.
-- **Config not found:** place `config.json` beside the SIF or pass `--config`.
+- **Permission denied while building:** configure Singularity fakeroot support
+  or use an account authorized to build images with `sudo`.
+- **Config not found:** run from a directory containing `config.json` or pass
+  `--config`.
 - **Output or bind errors:** use a writable host path and bind it into the
   container if it is outside the runtime's default bind paths.
 - **Conversion fails after simulation:** the ROOT file is retained in

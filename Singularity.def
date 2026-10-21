@@ -18,12 +18,7 @@ From: .build/eic_xl-nightly.sif
 %runscript
     set -eu
 
-    container_image="${APPTAINER_CONTAINER:-${SINGULARITY_CONTAINER:-}}"
-    if [ -n "$container_image" ]; then
-        config="${container_image%/*}/config.json"
-    else
-        config="$(pwd)/config.json"
-    fi
+    config="./config.json"
 
     config_set=false
     for arg in "$@"; do
@@ -67,5 +62,5 @@ From: .build/eic_xl-nightly.sif
 
 %help
     Self-contained EIC Geant generator runner.
-    Usage: apptainer run geant-generator.sif [config.json | --config config.json] [runner options]
-    Without a config argument, config.json next to the SIF is used.
+    Usage: singularity run geant-generator.sif [config.json | --config config.json] [runner options]
+    Without a config argument, ./config.json in the current directory is used.
