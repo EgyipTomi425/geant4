@@ -32,12 +32,14 @@ and generated data remain outside the image.
 ## Requirements
 
 - Linux on an architecture supported by the EIC XL image.
-- Apptainer. If it is missing on Debian/Ubuntu, `update.sh` installs the
-  build dependencies and compiles the pinned Apptainer release. This
-  requires network access and root or `sudo`. The updater first tries an
-  unprivileged fakeroot build, then a `sudo` build, and finally an unprivileged
-  `proot` build. On Debian/Ubuntu the updater installs `proot` if needed;
-  installing packages requires root or `sudo`.
+- Apptainer. If it is missing on Debian/Ubuntu, `update.sh` fetches the latest
+  stable Apptainer release and Go toolchain, installs the build dependencies,
+  and compiles Apptainer. This requires network access and root or `sudo`.
+  Version discovery and installation happen only when Apptainer is absent;
+  the updater does not automatically upgrade an existing installation. The
+  updater first tries an unprivileged fakeroot build, then a `sudo` build,
+  and finally an unprivileged `proot` build. On Debian/Ubuntu the updater
+  installs `proot` if needed; installing packages requires root or `sudo`.
 - Network access to the EIC container registry for a normal update. The EIC XL
   nightly image is pulled from `docker://eicweb/eic_xl:nightly`.
 - Enough disk space for both the base and generator SIF images (each is several

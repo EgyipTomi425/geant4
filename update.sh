@@ -14,8 +14,6 @@ TMP_DIR=""
 BUILD_IMAGE="$OUTPUT_DIR/.geant-generator.sif.tmp.$$"
 RESET_CONFIG=false
 LOCAL_BASE=""
-APPTAINER_VERSION="1.5.4"
-GO_VERSION="1.27.1"
 
 usage() {
     cat <<'EOF'
@@ -123,7 +121,7 @@ install_apptainer() {
         autoconf automake build-essential cryptsetup curl dh-apparmor fakeroot
         git libattr1-dev libfuse3-dev liblz4-dev liblzma-dev liblzo2-dev
         libprotobuf-c-dev libseccomp-dev libtalloc-dev libtool libzstd-dev
-        pkg-config proot squashfs-tools tzdata uidmap wget zlib1g-dev
+        pkg-config proot python3 squashfs-tools tzdata uidmap wget zlib1g-dev
     )
     local os_id os_version
     . /etc/os-release
@@ -138,7 +136,7 @@ install_apptainer() {
     fi
     run_privileged apt-get install -y --no-install-recommends "${packages[@]}"
 
-    local go_arch
+    local go_arch apptainer_tag apptainer_version go_archive go_version
     case "$(uname -m)" in
         x86_64) go_arch="amd64" ;;
         aarch64|arm64) go_arch="arm64" ;;
@@ -149,13 +147,56 @@ install_apptainer() {
     esac
 
     local source_dir="$TMP_DIR/apptainer-install"
-    local apptainer_src="$source_dir/apptainer-$APPTAINER_VERSION"
     mkdir -p "$source_dir"
-    wget -O "$source_dir/go.tar.gz" \
-        "https://go.dev/dl/go${GO_VERSION}.linux-${go_arch}.tar.gz"
-    tar -xzf "$source_dir/go.tar.gz" -C "$source_dir"
+    echo "Looking up the latest stable Apptainer and Go releases..."
+    wget -qO "$source_dir/apptainer-release.json" \
+        https://api.github.com/repos/apptainer/apptainer/releases/latest
+    apptainer_tag="$(python3 - "$source_dir/apptainer-release.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as release_file:
+    print(json.load(release_file)["tag_name"])
+PY
+)"
+    if [[ ! "$apptainer_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "ERROR: unexpected latest Apptainer release tag: $apptainer_tag" >&2
+        return 1
+    fi
+    apptainer_version="${apptainer_tag#v}"
+    local apptainer_src="$source_dir/apptainer-$apptainer_version"
+
+    wget -qO "$source_dir/go-releases.json" \
+        'https://go.dev/dl/?mode=json'
+    go_archive="$(python3 - "$source_dir/go-releases.json" "$go_arch" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as releases_file:
+    releases = json.load(releases_file)
+
+for release in releases:
+    if not release.get("stable"):
+        continue
+    for archive in release.get("files", []):
+        if (
+            archive.get("os") == "linux"
+            and archive.get("arch") == sys.argv[2]
+            and archive.get("kind") == "archive"
+        ):
+            print(archive["filename"])
+            raise SystemExit(0)
+
+raise SystemExit("No stable Go archive found for this Linux architecture")
+PY
+)"
+    go_version="${go_archive#go}"
+    go_version="${go_version%%.linux-*}"
+    echo "Installing Apptainer $apptainer_version and Go $go_version."
+    wget -O "$source_dir/$go_archive" "https://go.dev/dl/$go_archive"
+    tar -xzf "$source_dir/$go_archive" -C "$source_dir"
     wget -O "$source_dir/apptainer.tar.gz" \
-        "https://github.com/apptainer/apptainer/releases/download/v${APPTAINER_VERSION}/apptainer-${APPTAINER_VERSION}.tar.gz"
+        "https://github.com/apptainer/apptainer/releases/download/${apptainer_tag}/apptainer-${apptainer_version}.tar.gz"
     tar -xzf "$source_dir/apptainer.tar.gz" -C "$source_dir"
 
     (
