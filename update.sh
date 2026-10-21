@@ -138,7 +138,7 @@ install_apptainer() {
         autoconf automake build-essential cryptsetup curl dh-apparmor fakeroot
         git libattr1-dev libfuse3-dev liblz4-dev liblzma-dev liblzo2-dev
         libprotobuf-c-dev libseccomp-dev libtalloc-dev libtool libzstd-dev
-        pkg-config proot python3 squashfs-tools tzdata uidmap wget zlib1g-dev
+        pkg-config proot python3 python3-dev squashfs-tools tzdata uidmap wget zlib1g-dev
     )
     local os_id os_version
     . /etc/os-release
@@ -218,7 +218,9 @@ PY
 
     (
         cd "$apptainer_src"
-        export PATH="$source_dir/go/bin:$PATH"
+        export PATH="$source_dir/go/bin:/usr/bin:/bin"
+        unset CONDA_DEFAULT_ENV CONDA_PREFIX CONDA_PROMPT_MODIFIER
+        unset LD_LIBRARY_PATH PYTHONHOME PYTHONPATH VIRTUAL_ENV
         ./mconfig --without-suid
         ./scripts/download-dependencies
         ./scripts/compile-dependencies
@@ -230,6 +232,22 @@ PY
         fi
         run_privileged mkdir -p "$libexec_dir/apptainer/bin"
         run_privileged ./scripts/install-dependencies
+        local bundled_proot="$libexec_dir/apptainer/bin/proot"
+        if [[ ! -x "$bundled_proot" ]]; then
+            echo "ERROR: Apptainer's dependency installer did not provide $bundled_proot." >&2
+            exit 1
+        fi
+        local proot_libraries missing_libraries
+        if ! proot_libraries="$(ldd "$bundled_proot")"; then
+            echo "ERROR: could not inspect the shared libraries required by $bundled_proot." >&2
+            exit 1
+        fi
+        missing_libraries="$(grep 'not found' <<<"$proot_libraries" || true)"
+        if [[ -n "$missing_libraries" ]]; then
+            echo "ERROR: the bundled proot has unresolved shared libraries:" >&2
+            printf '%s\n' "$missing_libraries" >&2
+            exit 1
+        fi
         make -C builddir -j "$(nproc)"
         run_privileged make -C builddir install
     )
