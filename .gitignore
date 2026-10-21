@@ -1,4 +1,6 @@
 /apptainer/
+# Ignore old generated files until update.sh migrates them.
+/singularity/
 /.build/
 __pycache__/
 *.py[cod]

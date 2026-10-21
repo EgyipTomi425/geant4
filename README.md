@@ -36,12 +36,14 @@ and generated data remain outside the image.
   system package repositories. If the package is unavailable, it fetches the
   latest stable Apptainer release and Go toolchain, installs the build
   dependencies, and builds Apptainer from source. This requires network
-  access and root or `sudo`. Version discovery and installation happen only
-  when Apptainer is absent; the updater does not automatically upgrade an
-  existing installation. The updater first tries an unprivileged fakeroot
-  build, then a `sudo` build, and finally an unprivileged `proot` build. On
-  Debian/Ubuntu it installs `proot` if needed; installing packages requires
-  root or `sudo`.
+  access and root or `sudo`. The apt package uses the version provided by the
+  configured distribution repositories, which may not be the newest upstream
+  release. Version discovery and installation happen only when Apptainer is
+  absent; the updater does not automatically upgrade an existing installation.
+  For image builds, a non-root invocation tries fakeroot, then `sudo`, then
+  unprivileged `proot`; a root invocation tries a privileged build first,
+  then `proot`. On Debian/Ubuntu it installs `proot` if needed; installing
+  packages requires root or `sudo`.
 - Network access to the EIC container registry for a normal update. The EIC XL
   nightly image is pulled from `docker://eicweb/eic_xl:nightly`.
 - Enough disk space for both the base and generator SIF images (each is several
@@ -71,6 +73,11 @@ later updates. To deliberately restore the repository default config:
 ./update.sh --reset-config
 ```
 
+When upgrading an existing checkout that still has a generated `singularity/`
+directory, the updater moves it to `apptainer/` on the first run if the new
+directory does not already exist. This preserves the existing config, image,
+and simulation outputs.
+
 For an offline build or a local test using an existing compatible EIC image:
 
 ```bash
@@ -80,23 +87,25 @@ For an offline build or a local test using an existing compatible EIC image:
 ### Restricted hosts
 
 Some containerized or cluster hosts disable the Linux user namespaces needed
-for local image builds. The updater automatically tries fakeroot, `sudo`, and
-`proot`. If all fail, it prints a highlighted explanation and stops. `sudo`
-inside a container cannot override user-namespace restrictions imposed by
-the host kernel. Run the update on the Linux host, or ask the host
-administrator to enable Apptainer build/user-namespace support for the
-container.
+for local image builds. When run as a normal user, the updater tries fakeroot,
+`sudo`, and `proot`; when run as root, it tries a privileged build followed
+by `proot`. If all available methods fail, it prints a highlighted explanation
+and stops. `sudo` inside a container cannot override user-namespace
+restrictions imposed by the host kernel. Run the update on the Linux host, or
+ask the host administrator to enable Apptainer build/user-namespace support
+for the container.
 
-The downloaded base image is kept in `.build/eic_xl-nightly.sif`; it is a
-persistent cache and is not deleted after a successful build, so later updates
-can reuse it. It is ignored by Git. The generated image and config are kept in
-`apptainer/`; that directory is also not committed. The updater removes its
-per-run build temporary directory on both success and failure, and removes the
-`.build/tmp/` parent when it is empty. It stages the generator SIF separately
-and only replaces the existing image after a successful build, so a failed
-update does not leave a partial SIF or discard the previous working image. To
-reclaim the base image's disk space manually, remove `.build/eic_xl-nightly.sif`;
-the next update will download it again.
+The downloaded base image is kept at `.build/eic_xl-nightly.sif` and is not
+deleted after a successful build. On the next update, Apptainer pulls the
+nightly image to this same path; its own cache may reuse downloaded image
+layers. The base image is ignored by Git. The generated image and config are
+kept in `apptainer/`; that directory is also not committed. The updater removes
+its per-run build temporary directory on both success and failure, and removes
+the `.build/tmp/` parent when it is empty. It stages the generator SIF
+separately and only replaces the existing image after a successful build, so a
+failed update does not leave a partial SIF or discard the previous working
+image. To reclaim the base image's disk space manually, remove
+`.build/eic_xl-nightly.sif`; the next update will download it again.
 
 Build temporary files default to `.build/tmp/`, keeping large image extraction
 and compression off potentially space-limited system temporary filesystems. Set
@@ -201,11 +210,12 @@ outputs were created. If Apptainer is missing, `update.sh` installs it.
 
 - **No detector setup found:** rebuild from a valid EIC XL nightly image that
   includes a versioned EPIC detector installation.
-- **Permission denied while building:** the updater tries fakeroot, `sudo`,
-  and an unprivileged `proot` build. If all fail, the host/container kernel is
-  blocking the required namespace operations; run the update on the host or
-  ask the host administrator to enable Apptainer build support. Container
-  `sudo` cannot override this restriction.
+- **Permission denied while building:** the updater tries its local build
+  methods (fakeroot, `sudo`, and proot as a normal user; privileged build and
+  proot as root). If all fail, the host/container kernel may be blocking
+  required namespace operations; run the update on the host or ask the host
+  administrator to enable Apptainer build support. Container `sudo` cannot
+  override this restriction.
 - **Config not found:** run from a directory containing `config.json` or pass
   `--config`.
 - **Output or bind errors:** use a writable host path and bind it into the

@@ -5,6 +5,7 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$ROOT_DIR/.build"
 BASE_IMAGE="$BUILD_DIR/eic_xl-nightly.sif"
 OUTPUT_DIR="$ROOT_DIR/apptainer"
+LEGACY_OUTPUT_DIR="$ROOT_DIR/singularity"
 TMP_DIR_PARENT="${APPTAINER_TMPDIR:-$BUILD_DIR/tmp}"
 CLEAN_TMP_PARENT=false
 if [[ -z "${APPTAINER_TMPDIR:-}" ]]; then
@@ -59,6 +60,11 @@ while (($#)); do
             ;;
     esac
 done
+
+if [[ -d "$LEGACY_OUTPUT_DIR" && ! -e "$OUTPUT_DIR" ]]; then
+    mv -- "$LEGACY_OUTPUT_DIR" "$OUTPUT_DIR"
+    echo "Migrated existing generated files to $OUTPUT_DIR"
+fi
 
 run_privileged() {
     if ((EUID == 0)); then
@@ -289,7 +295,9 @@ if [[ -n "$LOCAL_BASE" ]]; then
         echo "ERROR: base SIF not found: $LOCAL_BASE" >&2
         exit 1
     fi
-    ln -sfn -- "$LOCAL_BASE" "$BASE_IMAGE"
+    if [[ "$(realpath -m -- "$BASE_IMAGE")" != "$LOCAL_BASE" ]]; then
+        ln -sfn -- "$LOCAL_BASE" "$BASE_IMAGE"
+    fi
 else
     echo "Pulling latest EIC XL nightly base image..."
     "$CONTAINER_RUNTIME" pull --force "$BASE_IMAGE" docker://eicweb/eic_xl:nightly
