@@ -38,13 +38,13 @@ and generated data remain outside the image.
   dependencies, and builds Apptainer from source. This requires network
   access and root or `sudo`. The apt package uses the version provided by the
   configured distribution repositories, which may not be the newest upstream
-  release. The source build uses the distribution's Python development
-  tools only for release metadata and disables PRoot's optional Python
-  extension, so its bundled helper does not link against an active
-  Conda/virtualenv Python. It also checks that Apptainer's bundled helpers
-  have their runtime libraries.
-  Version discovery and installation happen only when Apptainer is
-  absent; the updater does not automatically upgrade an existing installation.
+  release. The source build uses system Python only to read release metadata
+  and explicitly disables PRoot's optional Python extension, independent of
+  whether Conda or Python development tools are installed. It also checks that
+  Apptainer's bundled helpers have their runtime libraries. If an existing
+  installation has a bundled `proot` with unresolved libraries, the updater
+  rebuilds and replaces that helper before continuing; it does not otherwise
+  upgrade an existing Apptainer installation.
   For image builds, a non-root invocation tries fakeroot, then `sudo`, then
   unprivileged `proot`; a root invocation tries a privileged build first,
   then `proot`. On Debian/Ubuntu it installs `proot` if needed; installing

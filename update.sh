@@ -77,6 +77,10 @@ run_privileged() {
     fi
 }
 
+inspect_proot_libraries() {
+    env -u LD_LIBRARY_PATH -u LD_PRELOAD ldd "$1"
+}
+
 print_green_block() {
     if [[ -t 2 && -z "${NO_COLOR:-}" && "${TERM:-dumb}" != dumb ]]; then
         printf '\033[1;32m' >&2
@@ -115,22 +119,38 @@ cleanup_temporary_files() {
 trap cleanup_temporary_files EXIT
 
 install_apptainer() {
+    local repair_proot=false target_libexec_dir=""
+    if [[ "${1:-}" == "--repair-proot" ]]; then
+        repair_proot=true
+        target_libexec_dir="${2:-}"
+        if [[ -z "$target_libexec_dir" || "$target_libexec_dir" != /* ]]; then
+            echo "ERROR: repairing Apptainer's bundled proot requires an absolute LIBEXECDIR." >&2
+            return 1
+        fi
+    fi
+
     if ! command -v apt-get >/dev/null 2>&1 \
         || ! grep -Eq '^ID=(ubuntu|debian)$' /etc/os-release; then
         echo "ERROR: automatic Apptainer installation supports Debian/Ubuntu only. Install Apptainer and rerun." >&2
         return 1
     fi
 
-    echo "Apptainer not found; checking the Debian/Ubuntu package repositories first..."
-    run_privileged apt-get update
-    if run_privileged apt-get install -y --no-install-recommends apptainer; then
-        if command -v apptainer >/dev/null 2>&1; then
-            echo "Installed Apptainer from the system package repository."
-            return
-        fi
-        echo "WARNING: the package install succeeded but did not provide apptainer; falling back to a source build." >&2
+    if [[ "$repair_proot" == false ]]; then
+        echo "Apptainer not found; checking the Debian/Ubuntu package repositories first..."
     else
-        echo "Apptainer is unavailable from the configured package repositories; falling back to the latest upstream source release."
+        echo "Repairing Apptainer's bundled proot using a clean upstream build..."
+    fi
+    run_privileged apt-get update
+    if [[ "$repair_proot" == false ]]; then
+        if run_privileged apt-get install -y --no-install-recommends apptainer; then
+            if command -v apptainer >/dev/null 2>&1; then
+                echo "Installed Apptainer from the system package repository."
+                return
+            fi
+            echo "WARNING: the package install succeeded but did not provide apptainer; falling back to a source build." >&2
+        else
+            echo "Apptainer is unavailable from the configured package repositories; falling back to the latest upstream source release."
+        fi
     fi
 
     echo "Installing build dependencies for the upstream Apptainer source build..."
@@ -222,11 +242,46 @@ PY
         unset CONDA_DEFAULT_ENV CONDA_PREFIX CONDA_PROMPT_MODIFIER
         unset LD_LIBRARY_PATH PYTHONHOME PYTHONPATH VIRTUAL_ENV
         export WITHOUT_PYTHON=1
-        ./mconfig --without-suid
+        if [[ "$repair_proot" == true ]]; then
+            ./mconfig --without-suid \
+                --prefix="$("$CONTAINER_RUNTIME" buildcfg PREFIX)" \
+                --libexecdir="$target_libexec_dir"
+        else
+            ./mconfig --without-suid
+        fi
         ./scripts/download-dependencies
+        local proot_makefile
+        proot_makefile="$(find "$apptainer_src" -path '*/PRoot-*/src/GNUmakefile' -print -quit)"
+        if [[ -z "$proot_makefile" ]]; then
+            echo "ERROR: could not find Apptainer's bundled PRoot GNUmakefile." >&2
+            exit 1
+        fi
+        /usr/bin/python3 - "$proot_makefile" <<'PY'
+import pathlib
+import sys
+
+makefile = pathlib.Path(sys.argv[1])
+lines = makefile.read_text(encoding="utf-8").splitlines()
+replaced = {"HAS_SWIG": False, "HAS_PYTHON_CONFIG": False}
+for index, line in enumerate(lines):
+    for variable in replaced:
+        if line.startswith(f"{variable} :=") and "$(shell" in line:
+            lines[index] = f"{variable} :="
+            replaced[variable] = True
+
+if not all(replaced.values()):
+    raise SystemExit(
+        f"Could not disable automatic Python-extension detection in {makefile}"
+    )
+makefile.write_text("\n".join(lines) + "\n", encoding="utf-8")
+PY
         ./scripts/compile-dependencies
         local libexec_dir
-        libexec_dir="$(sed -n 's/^LIBEXECDIR := //p' builddir/Makefile)"
+        if [[ "$repair_proot" == true ]]; then
+            libexec_dir="$target_libexec_dir"
+        else
+            libexec_dir="$(sed -n 's/^LIBEXECDIR := //p' builddir/Makefile)"
+        fi
         if [[ -z "$libexec_dir" || "$libexec_dir" != /* ]]; then
             echo "ERROR: could not determine Apptainer's absolute LIBEXECDIR from builddir/Makefile." >&2
             exit 1
@@ -239,7 +294,7 @@ PY
             exit 1
         fi
         local proot_libraries missing_libraries
-        if ! proot_libraries="$(ldd "$bundled_proot")"; then
+        if ! proot_libraries="$(inspect_proot_libraries "$bundled_proot")"; then
             echo "ERROR: could not inspect the shared libraries required by $bundled_proot." >&2
             exit 1
         fi
@@ -249,8 +304,10 @@ PY
             printf '%s\n' "$missing_libraries" >&2
             exit 1
         fi
-        make -C builddir -j "$(nproc)"
-        run_privileged make -C builddir install
+        if [[ "$repair_proot" == false ]]; then
+            make -C builddir -j "$(nproc)"
+            run_privileged make -C builddir install
+        fi
     )
     rm -rf -- "$source_dir"
 }
@@ -314,6 +371,28 @@ if ! command -v apptainer >/dev/null 2>&1; then
     exit 1
 fi
 CONTAINER_RUNTIME="$(command -v apptainer)"
+APPTAINER_LIBEXECDIR="$("$CONTAINER_RUNTIME" buildcfg LIBEXECDIR)"
+if [[ -z "$APPTAINER_LIBEXECDIR" || "$APPTAINER_LIBEXECDIR" != /* ]]; then
+    echo "ERROR: could not determine Apptainer's absolute LIBEXECDIR." >&2
+    exit 1
+fi
+APPTAINER_PROOT="$APPTAINER_LIBEXECDIR/apptainer/bin/proot"
+if [[ -x "$APPTAINER_PROOT" ]]; then
+    if ! PROOT_LIBRARIES="$(inspect_proot_libraries "$APPTAINER_PROOT")"; then
+        echo "ERROR: could not inspect Apptainer's bundled proot: $APPTAINER_PROOT" >&2
+        exit 1
+    fi
+    if grep -q 'not found' <<<"$PROOT_LIBRARIES"; then
+        echo "Bundled proot has missing runtime libraries; repairing it before continuing."
+        install_apptainer --repair-proot "$APPTAINER_LIBEXECDIR"
+        if ! PROOT_LIBRARIES="$(inspect_proot_libraries "$APPTAINER_PROOT")" \
+            || grep -q 'not found' <<<"$PROOT_LIBRARIES"; then
+            echo "ERROR: Apptainer's bundled proot still has unresolved runtime libraries after repair:" >&2
+            printf '%s\n' "$PROOT_LIBRARIES" | grep 'not found' >&2 || true
+            exit 1
+        fi
+    fi
+fi
 
 if [[ -n "$LOCAL_BASE" ]]; then
     LOCAL_BASE="$(realpath -- "$LOCAL_BASE")"
