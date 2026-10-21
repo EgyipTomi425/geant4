@@ -36,8 +36,13 @@ and generated data remain outside the image.
   build dependencies and compiles the pinned SingularityCE release. This
   requires network access and root or `sudo`. The updater first tries an
   unprivileged fakeroot build, then a `sudo` build, and finally an unprivileged
-  `proot` build. On Debian/Ubuntu it installs `proot` if needed; installing
-  packages requires root or `sudo`.
+  `proot` build. If all local methods fail, it tries the SingularityCE remote
+  build service. Remote builds require a Singularity Container Services
+  account and a prior `singularity remote login`. On Debian/Ubuntu the updater
+  installs `proot` if needed; installing packages requires root or `sudo`.
+  The remote fallback uses the EIC XL nightly OCI image directly and uploads
+  the repository's generator scripts as build context; it cannot honor a
+  custom local `--base-sif` image.
 - Network access to the EIC container registry for a normal update. The EIC XL
   nightly image is pulled from `docker://eicweb/eic_xl:nightly`.
 - Enough disk space for both the base and generator SIF images (each is several
@@ -88,7 +93,16 @@ Build temporary files default to `.build/tmp/`, keeping large image extraction
 and compression off potentially space-limited system temporary filesystems. Set
 `SINGULARITY_TMPDIR` before running `update.sh` to use another writable
 location; the updater creates and removes its own subdirectory there, leaving
-the user-selected directory and its other contents untouched.
+the user-selected directory and its other contents untouched. If a local build
+fails, the updater tries the SingularityCE remote build service after the local
+fallbacks. Remote builds use the EIC XL nightly OCI image and upload the
+generator scripts as build context. A custom local `--base-sif` cannot be used
+by this fallback. Sign in once before running the updater if the remote
+fallback may be needed:
+
+```bash
+singularity remote login
+```
 
 ## Run
 
@@ -188,7 +202,9 @@ outputs were created. If SingularityCE is missing, `update.sh` installs it.
 - **No detector setup found:** rebuild from a valid EIC XL nightly image that
   includes a versioned EPIC detector installation.
 - **Permission denied while building:** the updater tries fakeroot, `sudo`,
-  and an unprivileged `proot` build in order. If all fail, configure user
+  and an unprivileged `proot` build, then tries the SingularityCE remote build
+  service. Remote builds require a Singularity Container Services account and
+  `singularity remote login`. If remote builds are unavailable, configure user
   namespaces on the host or build outside the restricted container.
 - **Config not found:** run from a directory containing `config.json` or pass
   `--config`.

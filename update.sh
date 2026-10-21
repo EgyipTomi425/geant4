@@ -161,12 +161,55 @@ install_proot() {
     fi
 
     echo "proot not found; installing it for the unprivileged build fallback..."
-    run_privileged apt-get update
-    run_privileged apt-get install -y --no-install-recommends proot
+    if ! run_privileged apt-get update; then
+        echo "ERROR: could not update package indexes to install proot." >&2
+        return 1
+    fi
+    if ! run_privileged apt-get install -y --no-install-recommends proot; then
+        echo "ERROR: could not install proot." >&2
+        return 1
+    fi
     if ! command -v proot >/dev/null 2>&1; then
         echo "ERROR: proot installation did not provide a proot command." >&2
         return 1
     fi
+}
+
+try_proot_build() {
+    if ! install_proot; then
+        return 1
+    fi
+    rm -f -- "$BUILD_IMAGE"
+    echo "Trying an unprivileged SingularityCE build with proot..."
+    if "$CONTAINER_RUNTIME" build --force "$BUILD_IMAGE" Singularity.def; then
+        return 0
+    fi
+    return 1
+}
+
+try_remote_build() {
+    if [[ -n "$LOCAL_BASE" ]]; then
+        echo "ERROR: remote build cannot use the local --base-sif override." >&2
+        return 1
+    fi
+
+    echo "Trying the SingularityCE remote build service..."
+    local remote_definition="$TMP_DIR/Singularity.remote.def"
+    if ! sed '1,2c\
+Bootstrap: docker\
+From: docker://eicweb/eic_xl:nightly' \
+        Singularity.def > "$remote_definition"; then
+        echo "ERROR: could not prepare the remote build definition." >&2
+        return 1
+    fi
+    rm -f -- "$BUILD_IMAGE"
+    if "$CONTAINER_RUNTIME" build --remote --force \
+        "$BUILD_IMAGE" "$remote_definition"; then
+        return 0
+    fi
+
+    echo "ERROR: remote build failed. Sign in with 'singularity remote login' and verify remote build service access." >&2
+    return 1
 }
 
 if ! command -v singularity >/dev/null 2>&1; then
@@ -204,7 +247,16 @@ fi
 echo "Building generator image with $CONTAINER_RUNTIME..."
 cd "$ROOT_DIR"
 if ((EUID == 0)); then
-    "$CONTAINER_RUNTIME" build --force "$BUILD_IMAGE" Singularity.def
+    if ! "$CONTAINER_RUNTIME" build --force "$BUILD_IMAGE" Singularity.def; then
+        echo "Privileged local build failed; trying an unprivileged proot build."
+        if ! try_proot_build; then
+            echo "Local proot build failed."
+            try_remote_build || {
+                echo "ERROR: local and remote build attempts failed." >&2
+                exit 1
+            }
+        fi
+    fi
 else
     echo "Trying an unprivileged fakeroot build..."
     if "$CONTAINER_RUNTIME" build --fakeroot --force \
@@ -229,11 +281,13 @@ else
             echo "sudo is unavailable; trying an unprivileged proot build."
         fi
         if [[ "$sudo_build_succeeded" == false ]]; then
-            install_proot
-            rm -f -- "$BUILD_IMAGE"
-            echo "Trying an unprivileged SingularityCE build with proot..."
-            "$CONTAINER_RUNTIME" build --force \
-                "$BUILD_IMAGE" Singularity.def
+            if ! try_proot_build; then
+                echo "Local proot build failed; trying the SingularityCE remote build service."
+                if ! try_remote_build; then
+                    echo "ERROR: local fakeroot, sudo, proot, and remote builds all failed." >&2
+                    exit 1
+                fi
+            fi
         fi
     fi
 fi
