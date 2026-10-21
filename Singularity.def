@@ -1,0 +1,71 @@
+Bootstrap: localimage
+From: .build/eic_xl-nightly.sif
+
+%files
+    scripts/run_simulations.py /opt/geant-generator/run_simulations.py
+    scripts/better_root_to_csv.py /opt/geant-generator/better_root_to_csv.py
+    scripts/root_to_csv_with_particles.py /opt/geant-generator/root_to_csv_with_particles.py
+
+%post
+    mkdir -p /opt/geant-generator
+    chmod 0555 /opt/geant-generator/run_simulations.py
+    chmod 0555 /opt/geant-generator/better_root_to_csv.py
+    chmod 0555 /opt/geant-generator/root_to_csv_with_particles.py
+
+%environment
+    export PYTHONUNBUFFERED=1
+
+%runscript
+    set -eu
+
+    container_image="${APPTAINER_CONTAINER:-${SINGULARITY_CONTAINER:-}}"
+    if [ -n "$container_image" ]; then
+        config="${container_image%/*}/config.json"
+    else
+        config="$(pwd)/config.json"
+    fi
+
+    config_set=false
+    for arg in "$@"; do
+        case "$arg" in
+            --config|--config=*) config_set=true ;;
+        esac
+    done
+
+    case "${1:-}" in
+        --config|--config=*) ;;
+        -*)
+            if [ "$config_set" = false ]; then
+                set -- --config "$config" "$@"
+            fi
+            ;;
+        "")
+            set -- --config "$config"
+            ;;
+        *)
+            config="$1"
+            shift
+            set -- --config "$config" "$@"
+            ;;
+    esac
+
+    detector_dir="$(
+        for setup in /opt/detector/epic-[0-9]*/bin/thisepic.sh; do
+            [ -f "$setup" ] || continue
+            printf '%s\n' "${setup%/bin/thisepic.sh}"
+        done | sort -V | tail -n 1
+    )"
+    if [ -z "$detector_dir" ]; then
+        echo "ERROR: no versioned EPIC detector setup found under /opt/detector." >&2
+        exit 1
+    fi
+    echo "Using latest bundled detector: $detector_dir" >&2
+
+    exec /bin/bash -lc \
+        'source "$1/bin/thisepic.sh" || exit $?; : "${DETECTOR_PATH:?detector setup did not set DETECTOR_PATH}"; export DETECTOR_CACHE="$DETECTOR_PATH"; shift; exec python3 /opt/geant-generator/run_simulations.py "$@"' \
+        _ "$detector_dir" "$@"
+
+%help
+    Self-contained EIC Geant generator runner.
+    Usage: apptainer run geant-generator.sif [config.json | --config config.json] [runner options]
+    Without a config argument, config.json next to the SIF is used.
