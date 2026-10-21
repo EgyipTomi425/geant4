@@ -106,8 +106,15 @@ cleanup_temporary_files() {
     fi
     if [[ -n "$TMP_DIR" && -d "$TMP_DIR" ]] \
         && ! rm -rf -- "$TMP_DIR"; then
-        echo "ERROR: could not remove temporary build directory: $TMP_DIR" >&2
-        exit_status=1
+        if ((EUID != 0)) && command -v sudo >/dev/null 2>&1; then
+            if ! sudo rm -rf -- "$TMP_DIR"; then
+                echo "ERROR: could not remove temporary build directory: $TMP_DIR" >&2
+                exit_status=1
+            fi
+        else
+            echo "ERROR: could not remove temporary build directory: $TMP_DIR" >&2
+            exit_status=1
+        fi
     fi
     if [[ "$CLEAN_TMP_PARENT" == true && -d "$TMP_DIR_PARENT" ]]; then
         if ! rmdir -- "$TMP_DIR_PARENT"; then
@@ -339,6 +346,161 @@ The previous working generator image, if any, has been preserved.
 EOF
 }
 
+get_primary_partition_id() {
+    local image="$1" listing
+    listing="$("$CONTAINER_RUNTIME" sif list "$image")" || return 1
+    awk '$5 == "|Partition" && $6 ~ /PrimSys/ { print $1 }' <<<"$listing"
+}
+
+build_without_namespaces() {
+    local old_partition_id architecture partition_arch
+    local base_listing partition_info filesystem
+    local partition_name="geant-generator-rootfs.squashfs"
+    local raw_rootfs="$TMP_DIR/base-rootfs.squashfs"
+    local rootfs_dir="$TMP_DIR/rootfs"
+    local new_rootfs="$TMP_DIR/generator-rootfs.squashfs"
+    local runscript="$TMP_DIR/runscript"
+    local environment="$TMP_DIR/90-geant-generator.sh"
+
+    echo "Building without user namespaces by updating the SIF root filesystem..."
+    base_listing="$("$CONTAINER_RUNTIME" sif list "$BASE_IMAGE")" || {
+        echo "ERROR: could not inspect the base SIF: $BASE_IMAGE" >&2
+        return 1
+    }
+    old_partition_id="$(awk '$5 == "|Partition" && $6 ~ /PrimSys/ { print $1 }' \
+        <<<"$base_listing")"
+    if [[ ! "$old_partition_id" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: could not identify a unique primary system partition in $BASE_IMAGE." >&2
+        return 1
+    fi
+
+    partition_info="$("$CONTAINER_RUNTIME" sif info "$old_partition_id" "$BASE_IMAGE")" || {
+        echo "ERROR: could not read the base SIF partition architecture." >&2
+        return 1
+    }
+    filesystem="$(sed -n 's/^[[:space:]]*Filesystem Type:[[:space:]]*//p' \
+        <<<"$partition_info")"
+    if [[ "$filesystem" != Squashfs ]]; then
+        echo "ERROR: namespace-free assembly supports SquashFS base images, not ${filesystem:-unknown}." >&2
+        return 1
+    fi
+    architecture="$(sed -n 's/^[[:space:]]*Architecture:[[:space:]]*//p' \
+        <<<"$partition_info")"
+    case "$architecture" in
+        amd64) partition_arch=2 ;;
+        arm64) partition_arch=4 ;;
+        *)
+            echo "ERROR: unsupported SIF partition architecture: ${architecture:-unknown}" >&2
+            return 1
+            ;;
+    esac
+
+    local libexec_bin="$APPTAINER_LIBEXECDIR/apptainer/bin"
+    local unsquashfs="$libexec_bin/unsquashfs"
+    local mksquashfs="$libexec_bin/mksquashfs"
+    if [[ ! -x "$unsquashfs" ]]; then
+        unsquashfs="$(command -v unsquashfs || true)"
+    fi
+    if [[ ! -x "$mksquashfs" ]]; then
+        mksquashfs="$(command -v mksquashfs || true)"
+    fi
+    if [[ -z "$unsquashfs" || -z "$mksquashfs" ]]; then
+        echo "ERROR: namespace-free image assembly requires unsquashfs and mksquashfs." >&2
+        return 1
+    fi
+
+    rm -f -- "$BUILD_IMAGE"
+    cp -- "$BASE_IMAGE" "$BUILD_IMAGE" || {
+        echo "ERROR: could not stage the base SIF for namespace-free assembly." >&2
+        return 1
+    }
+    "$CONTAINER_RUNTIME" sif dump "$old_partition_id" "$BASE_IMAGE" >"$raw_rootfs" || {
+        echo "ERROR: could not extract the base SIF root filesystem partition." >&2
+        return 1
+    }
+    run_privileged "$unsquashfs" -no-progress -d "$rootfs_dir" "$raw_rootfs" || {
+        echo "ERROR: could not unpack the base SquashFS root filesystem." >&2
+        return 1
+    }
+
+    run_privileged install -D -o 0 -g 0 -m 0555 \
+        "$ROOT_DIR/scripts/run_simulations.py" \
+        "$rootfs_dir/opt/geant-generator/run_simulations.py" || return 1
+    run_privileged install -D -o 0 -g 0 -m 0555 \
+        "$ROOT_DIR/scripts/better_root_to_csv.py" \
+        "$rootfs_dir/opt/geant-generator/better_root_to_csv.py" || return 1
+    run_privileged install -D -o 0 -g 0 -m 0555 \
+        "$ROOT_DIR/scripts/root_to_csv_with_particles.py" \
+        "$rootfs_dir/opt/geant-generator/root_to_csv_with_particles.py" || return 1
+    run_privileged install -D -o 0 -g 0 -m 0555 \
+        "$ROOT_DIR/scripts/container_runscript.sh" \
+        "$rootfs_dir/opt/geant-generator/container_runscript.sh" || return 1
+
+    printf '%s\n' \
+        '#!/bin/sh' \
+        'exec /bin/bash /opt/geant-generator/container_runscript.sh "$@"' \
+        >"$runscript"
+    printf '%s\n' 'export PYTHONUNBUFFERED=1' >"$environment"
+    run_privileged install -D -o 0 -g 0 -m 0555 \
+        "$runscript" "$rootfs_dir/.singularity.d/runscript" || return 1
+    run_privileged install -D -o 0 -g 0 -m 0444 \
+        "$environment" "$rootfs_dir/.singularity.d/env/90-geant-generator.sh" || return 1
+
+    run_privileged "$mksquashfs" "$rootfs_dir" "$new_rootfs" \
+        -noappend -comp gzip -processors "$(nproc)" || {
+        echo "ERROR: could not create the generator SquashFS root filesystem." >&2
+        return 1
+    }
+    "$CONTAINER_RUNTIME" sif add "$BUILD_IMAGE" "$new_rootfs" \
+        --datatype 4 --parttype 1 --partfs 1 \
+        --partarch "$partition_arch" --filename "$partition_name" || {
+        echo "ERROR: could not add the generator root filesystem to the SIF." >&2
+        return 1
+    }
+
+    local listing added_partition_id="" candidate_id
+    local -A existing_descriptor_ids=()
+    while read -r candidate_id; do
+        [[ "$candidate_id" =~ ^[0-9]+$ ]] \
+            && existing_descriptor_ids["$candidate_id"]=1
+    done < <(awk '$1 ~ /^[0-9]+$/ { print $1 }' <<<"$base_listing")
+
+    listing="$("$CONTAINER_RUNTIME" sif list "$BUILD_IMAGE")" || {
+        echo "ERROR: could not inspect the generated SIF." >&2
+        return 1
+    }
+    while read -r candidate_id; do
+        [[ "$candidate_id" =~ ^[0-9]+$ ]] || continue
+        if [[ -z "${existing_descriptor_ids[$candidate_id]:-}" ]] \
+            && "$CONTAINER_RUNTIME" sif info "$candidate_id" "$BUILD_IMAGE" \
+                | grep -Fq "Name: $partition_name"; then
+            added_partition_id="$candidate_id"
+            break
+        fi
+    done < <(awk '$5 == "|Partition" { print $1 }' <<<"$listing")
+    if [[ ! "$added_partition_id" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: could not identify the new root filesystem partition in the generated SIF." >&2
+        return 1
+    fi
+
+    "$CONTAINER_RUNTIME" sif setprim "$added_partition_id" "$BUILD_IMAGE" || {
+        echo "ERROR: could not mark the generator root filesystem as the primary SIF partition." >&2
+        return 1
+    }
+    "$CONTAINER_RUNTIME" sif del "$old_partition_id" "$BUILD_IMAGE" || {
+        echo "ERROR: could not remove the superseded base root filesystem partition." >&2
+        return 1
+    }
+    if [[ "$(get_primary_partition_id "$BUILD_IMAGE")" != "$added_partition_id" ]]; then
+        echo "ERROR: the generated SIF does not have the new root filesystem as its primary partition." >&2
+        return 1
+    fi
+    run_privileged rm -rf -- "$rootfs_dir" || {
+        echo "ERROR: could not remove the temporary extracted root filesystem." >&2
+        return 1
+    }
+}
+
 if ! command -v apptainer >/dev/null 2>&1; then
     install_apptainer
 fi
@@ -397,19 +559,18 @@ fi
 
 echo "Building generator image with $CONTAINER_RUNTIME..."
 cd "$ROOT_DIR"
+build_succeeded=false
 if ((EUID == 0)); then
-    if ! "$CONTAINER_RUNTIME" build --force "$BUILD_IMAGE" Apptainer.def; then
-        report_local_build_failure
-        exit 1
+    if "$CONTAINER_RUNTIME" build --force "$BUILD_IMAGE" Apptainer.def; then
+        build_succeeded=true
     fi
 else
     echo "Trying an unprivileged fakeroot build..."
     if "$CONTAINER_RUNTIME" build --fakeroot --force \
         "$BUILD_IMAGE" Apptainer.def; then
-        :
+        build_succeeded=true
     else
         echo "Fakeroot build failed or is unavailable."
-        sudo_build_succeeded=false
         if command -v sudo >/dev/null 2>&1; then
             echo "Falling back to a sudo build..."
             rm -f -- "$BUILD_IMAGE"
@@ -418,17 +579,20 @@ else
                 "$CONTAINER_RUNTIME" build --force \
                 "$BUILD_IMAGE" Apptainer.def; then
                 sudo chown "$(id -u):$(id -g)" "$BUILD_IMAGE"
-                sudo_build_succeeded=true
+                build_succeeded=true
             else
                 echo "Sudo build failed."
             fi
         else
             echo "sudo is unavailable."
         fi
-        if [[ "$sudo_build_succeeded" == false ]]; then
-            report_local_build_failure
-            exit 1
-        fi
+    fi
+fi
+if [[ "$build_succeeded" == false ]]; then
+    rm -f -- "$BUILD_IMAGE"
+    if ! build_without_namespaces; then
+        report_local_build_failure
+        exit 1
     fi
 fi
 chmod +x "$BUILD_IMAGE"

@@ -16,6 +16,8 @@ and generated data remain outside the image.
   runtime.
 - `scripts/config.json` is the default simulation configuration.
 - `scripts/run_simulations.py` orchestrates simulations and conversion.
+- `scripts/container_runscript.sh` selects the bundled detector and launches
+  the simulation runner inside the image.
 - `scripts/better_root_to_csv.py` is the basic hit-level converter.
 - `scripts/root_to_csv_with_particles.py` exports contribution, particle,
   parent, daughter, and optional detailed-step data.
@@ -46,9 +48,10 @@ and generated data remain outside the image.
   rebuilds and replaces that helper before continuing; it does not otherwise
   upgrade an existing Apptainer installation.
   For image builds, a non-root invocation tries fakeroot and then `sudo`;
-  a root invocation tries a privileged build. These methods require working
-  user namespaces or a supported setuid Apptainer installation. PRoot cannot
-  replace those kernel features for Apptainer image builds.
+  a root invocation tries a privileged build. If both fail because user
+  namespaces are disabled, the updater rebuilds the SIF root filesystem
+  directly with SquashFS and Apptainer's SIF tools, without creating a
+  namespace. PRoot cannot replace those kernel features for Apptainer builds.
 - Network access to the EIC container registry for a normal update. The EIC XL
   nightly image is pulled from `docker://eicweb/eic_xl:nightly`.
 - Enough disk space for both the base and generator SIF images (each is several
@@ -95,12 +98,14 @@ Some containerized or cluster hosts disable the Linux user namespaces needed
 for local image builds. When run as a normal user, the updater tries fakeroot
 and then `sudo`; when run as root, it tries a privileged build. If these methods
 fail because the host blocks user namespaces and Apptainer has no supported
-setuid installation, the updater reports the limitation and stops. `sudo`
-inside a container cannot override restrictions imposed by the host kernel,
-and PRoot is not a substitute for the kernel features required by Apptainer.
-Run the update on a Linux host with user namespaces enabled, or ask the host
-administrator to provide Apptainer build/user-namespace support for the
-container.
+setuid installation, the updater falls back to a namespace-free SIF rebuild.
+It uses the SquashFS and SIF utilities bundled with Apptainer, preserves the
+existing base image's metadata, and replaces its primary root filesystem with
+the generator-enabled filesystem. If those utilities are missing, install
+`squashfs-tools` or ask the host administrator to provide them. This fallback
+also needs root or `sudo` to preserve filesystem ownership. `sudo` inside a
+container cannot override restrictions imposed by the host kernel, and PRoot
+is not a substitute for the kernel features required by Apptainer.
 
 The downloaded base image is kept at `.build/eic_xl-nightly.sif` and is not
 deleted after a successful build. On the next update, Apptainer pulls the
