@@ -161,7 +161,7 @@ install_apptainer() {
     (
         cd "$apptainer_src"
         export PATH="$source_dir/go/bin:$PATH"
-        ./mconfig
+        ./mconfig --without-suid
         ./scripts/download-dependencies
         ./scripts/compile-dependencies
         run_privileged ./scripts/install-dependencies
