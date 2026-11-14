@@ -241,3 +241,9 @@ contribution export. `--no-field` places a private detector copy beneath
 `roots_dir/_nofield_compact/geometry`; this also keeps beamline constants
 such as `offset_OMD_x` while removing fields. The CSV converter exports
 `LFHCALHits` in both modes; full-detector ROOT files retain all hit collections.
+
+The GitHub-hosted Ubuntu integration job enables user namespaces on its
+ephemeral runner and checks them with `unshare` before the image build.
+This addresses AppArmor restrictions that otherwise allow the image to build
+but prevent Apptainer from starting it (`Operation not permitted`, exit 255).
+It does not change settings on machines running this repository locally.
