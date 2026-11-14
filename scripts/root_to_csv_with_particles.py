@@ -9,7 +9,7 @@ epitunk - csak egy szintet felfele es egy szintet lefele.
 
 Uj oszlopok
 -----------
-n_contributions          hany Geant4 step jarult hozza ehhez a cellahoz
+n_contributions          hany mentett contribution tartozik a hithez
 contribution_index       melyik contribution-t irja ez a sor (0-alapu)
 contrib_pdg / _type      a contribution sajat PDG kodja (CaloHitContribution.PDG)
 contrib_energy           a contribution energiaja [GeV]
@@ -252,12 +252,11 @@ def relation_slice(begins, ends, indices, i, n_valid):
 
 HEADER = [
     "event_number", "cellID", "x", "y", "z", "energy",
-    "earliest_contribution_time",
-    "contrib_step_x", "contrib_step_y", "contrib_step_z",
-    "contrib_step_length",
-    "incoming_momentum", "incoming_theta", "incoming_phi",
-    "contribution_index", "particle_index", "particle_pdg", "particle_type",
-    "is_secondary", "parent_type", "daughter_type",
+    "earliest_contribution_time", "incoming_momentum", "incoming_theta",
+    "incoming_phi", "n_contributions", "contribution_index", "contrib_pdg",
+    "contrib_type", "contrib_energy", "contrib_energy_fraction", "contrib_time",
+    "particle_index", "particle_pdg", "particle_type", "is_secondary",
+    "parent_pdg", "parent_type", "daughter_pdg", "daughter_type",
 ]
 
 
@@ -404,10 +403,6 @@ def root_to_csv(input_file, output_dir=None, output_file=None,
                     contrib_times = get("contrib_time", i)
                     contrib_energies = get("contrib_energy", i)
                     contrib_pdgs = get("contrib_pdg", i)
-                    contrib_step_x = get("contrib_step_x", i)
-                    contrib_step_y = get("contrib_step_y", i)
-                    contrib_step_z = get("contrib_step_z", i)
-                    contrib_step_length = get("contrib_step_length", i)
                     contrib_particles = get("contrib_particle", i)
 
                     n_contrib_total = (
@@ -458,19 +453,10 @@ def root_to_csv(input_file, output_dir=None, output_file=None,
                             is_secondary = ""
                             parent_pdg = parent_type = ""
                             daughter_pdg = daughter_type = ""
-                            step_x = step_y = step_z = step_length = ""
 
                             if sel is not None:
                                 pos = positions[sel]
 
-                                if contrib_step_x is not None:
-                                    step_x = float(contrib_step_x[pos])
-                                if contrib_step_y is not None:
-                                    step_y = float(contrib_step_y[pos])
-                                if contrib_step_z is not None:
-                                    step_z = float(contrib_step_z[pos])
-                                if contrib_step_length is not None:
-                                    step_length = float(contrib_step_length[pos])
                                 if contrib_pdgs is not None:
                                     c_pdg = int(contrib_pdgs[pos])
                                     c_type = particle_name(c_pdg)
@@ -527,19 +513,23 @@ def root_to_csv(input_file, output_dir=None, output_file=None,
                                 float(z_values[hit_i]),
                                 hit_energy,
                                 earliest_time,
-                                step_x,
-                                step_y,
-                                step_z,
-                                step_length,
                                 incoming_momentum,
                                 incoming_theta,
                                 incoming_phi,
-                                positions[sel] if sel is not None else "",
+                                n_contrib,
+                                sel if sel is not None else "",
+                                c_pdg,
+                                c_type,
+                                c_energy,
+                                c_frac,
+                                c_time,
                                 particle_index,
                                 particle_pdg,
                                 particle_type,
                                 is_secondary,
+                                parent_pdg,
                                 parent_type,
+                                daughter_pdg,
                                 daughter_type,
                             ])
                             n_rows += 1

@@ -20,7 +20,7 @@ and generated data remain outside the image.
   the simulation runner inside the image.
 - `scripts/better_root_to_csv.py` is the basic hit-level converter.
 - `scripts/root_to_csv_with_particles.py` exports contribution, particle,
-  parent, daughter, and optional detailed-step data.
+  parent, and daughter data in the legacy 25-column format.
 - `scripts/check_secondaries.py` summarizes secondary-particle rows in a CSV.
 - `scripts/inspect_root_truth.py` inspects MC truth and contribution links in a
   ROOT file.
@@ -187,7 +187,7 @@ Key options:
   but enabling it implies MC truth, matching the original runner.
 - `min_kinetic_energy` and `save_processes`: MC-truth particle-selection
   settings.
-- `detailed_shower`: enables contribution step PDG, positions, and lengths.
+- `detailed_shower`: fills contribution PDG and detailed positions/lengths in ROOT; CSV exports contribution PDG but not the step-position/length columns.
 - `contributions`: particle-aware converter mode: `earliest`, `dominant`, or
   `all`.
 - `jobs`: maximum number of parallel workers; the runner caps this to the
@@ -247,3 +247,11 @@ ephemeral runner and checks them with `unshare` before the image build.
 This addresses AppArmor restrictions that otherwise allow the image to build
 but prevent Apptainer from starting it (`Operation not permitted`, exit 255).
 It does not change settings on machines running this repository locally.
+
+The particle-aware CSV export preserves the legacy 25-column schema, including
+contribution counts, hit-local contribution indices, contribution energy/time/PDG,
+and parent/daughter PDG lists. Step-position and step-length columns are not
+exported; detailed shower data remain in ROOT and populate contribution PDG.
+`energy` is the total hit energy even when only the earliest contribution is
+exported. `contribution_index` is zero-based within the hit, not an index into
+the event-wide contribution collection.
