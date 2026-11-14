@@ -315,13 +315,17 @@ For an intentionally authorized full run, in the same directory:
 
 ```bash
 tmux new -s geant4
-set -o pipefail
-./geant-generator.sif --config ./config.json 2>&1 | tee generation.log
+./geant-generator.sif --config ./config.json
 ```
 
 Detach without stopping the run with **Ctrl+B**, then **D**. Reattach with
-`tmux attach -t geant4`. `tee` saves the complete log to disk; tmux keeps only
-its configured scrollback buffer. The configured `jobs: 100` is capped at the
+`tmux attach -t geant4`. By default, diagnostic output goes only to the
+terminal: **file logging is disabled**. The runner does not create a
+`generation.log` or `run.log` transcript. Do not add `tee` or shell output
+redirection unless you explicitly want a persistent log. Tmux retains only
+its configured scrollback buffer. ROOT/CSV outputs and temporary steering
+files are simulation data, not terminal-log copies.
+The configured `jobs: 100` is capped at the
 16 actual jobs. To reduce simultaneous memory/CPU demand, add `--jobs 4`.
 Do not run a second copy with the same output paths: names would collide.
 
@@ -378,7 +382,7 @@ particle types, and both seeds. TB below are decimal, not TiB.
 | Both | **7.02 TB** | **1.79 TB** | **8.82 TB** |
 
 Plan for **11–12 TB free**, including margin for statistical variation,
-temporary files, container images and logs. This is an estimate, not a measured
+temporary files and container images. This is an estimate, not a measured
 24-million-event run; a different detector/nightly version or configuration can
 change the sizes. Keeping only CSV would reduce final retained size, but the
 runner currently retains ROOT as well. A roughly 16 TiB disk has sufficient
