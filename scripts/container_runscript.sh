@@ -40,5 +40,5 @@ fi
 echo "Using latest bundled detector: $detector_dir" >&2
 
 exec /bin/bash -lc \
-    'source "$1/bin/thisepic.sh" || exit $?; : "${DETECTOR_PATH:?detector setup did not set DETECTOR_PATH}"; export DETECTOR_CACHE="$DETECTOR_PATH"; shift; exec python3 /opt/geant-generator/run_simulations.py "$@"' \
+    'source "$1/bin/thisepic.sh" epic || exit $?; : "${DETECTOR_PATH:?detector setup did not set DETECTOR_PATH}"; export DETECTOR_CACHE="$DETECTOR_PATH"; shift; exec python3 /opt/geant-generator/run_simulations.py "$@"' \
     _ "$detector_dir" "$@"

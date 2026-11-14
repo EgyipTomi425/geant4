@@ -179,7 +179,7 @@ Key options:
 
 - `num_seeds`: number of seeds per particle/detector/event combination.
   With `random_seeds: false`, the first seeds are fixed at 42 and 1024.
-- `no_field`: strips field includes from the compact geometry.
+- `no_field`: removes actual field elements from a private copy of the detector XMLs, including nested subsystem fields. Geometry constants and includes are preserved; the original installation is unchanged.
 - `mc_truth`: stores contribution-linked MC particle ancestry. With this
   enabled, `auto` selects the particle-aware converter.
 - `keep_all_particles`: additionally stores every Geant4 track; can greatly
@@ -214,8 +214,8 @@ build before a large production run.
 GitHub Actions runs on Ubuntu 26.04. It performs Python/JSON/shell syntax
 checks, unit tests for config and job planning, and the default-config dry-run
 on pushes and pull requests. On pushes to `master` (and manual `workflow_dispatch`
-runs), it also builds the EIC container, runs the full default JSON
-configuration (8 jobs, 100 events each), and verifies that all ROOT and CSV
+runs), it also builds the EIC container, runs the both detector configurations from the default JSON
+configuration with a CI event-count override (16 jobs, 100 events each), and verifies that all ROOT and CSV
 outputs were created. If Apptainer is missing, `update.sh` installs it.
 
 ## Troubleshooting
@@ -234,3 +234,10 @@ outputs were created. If Apptainer is missing, `update.sh` installs it.
   container if it is outside the runtime's default bind paths.
 - **Conversion fails after simulation:** the ROOT file is retained in
   `roots_dir`; the failed job's scratch directory includes its steering file.
+
+The default JSON uses 1000 events, both `standalone` and `fulldet`, seeds 42
+and 1024, no magnetic field, MC truth, detailed shower data, and `earliest`
+contribution export. `--no-field` places a private detector copy beneath
+`roots_dir/_nofield_compact/geometry`; this also keeps beamline constants
+such as `offset_OMD_x` while removing fields. The CSV converter exports
+`LFHCALHits` in both modes; full-detector ROOT files retain all hit collections.

@@ -24,13 +24,13 @@ class DefaultConfigTests(unittest.TestCase):
 
     def test_default_configuration_plans_four_particles_and_two_fixed_seeds(self):
         jobs = run_simulations.build_job_list(self.args)
-        self.assertEqual(len(jobs), 8)
+        self.assertEqual(len(jobs), 16)
         self.assertEqual(
             [job.seed_value for job in jobs[:2]],
             [42, 1024],
         )
-        self.assertEqual({job.num_events for job in jobs}, {100})
-        self.assertEqual({job.detector for job in jobs}, {"standalone"})
+        self.assertEqual({job.num_events for job in jobs}, {1000})
+        self.assertEqual({job.detector for job in jobs}, {"standalone", "fulldet"})
 
     def test_mc_truth_and_detailed_steps_are_enabled_without_keep_all(self):
         self.assertTrue(self.args.mc_truth)

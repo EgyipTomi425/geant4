@@ -1,13 +1,23 @@
 {
-  "particles": ["e-", "mu-", "proton", "pi+"],
+  "particles": [
+    "e-",
+    "mu-",
+    "proton",
+    "pi+"
+  ],
   "num_seeds": 2,
   "random_seeds": false,
-  "events": [100],
+  "events": [
+    1000
+  ],
   "theta_min": 7,
   "theta_max": 36,
   "momentum_min": 0,
   "momentum_max": 20,
-  "detector": ["standalone"],
+  "detector": [
+    "standalone",
+    "fulldet"
+  ],
   "no_field": true,
   "physics_list": "FTFP_BERT",
   "mc_truth": true,
@@ -30,7 +40,7 @@
   "output_dir": "./output/csv",
   "roots_dir": "./output/roots",
   "_comment": "JSON has no comments; all _comment* keys are ignored by the runner. Option explanations are listed below.",
-  "_comment_no_field": "true disables magnetic and beamline fields by removing compact/fields includes.",
+  "_comment_no_field": "true removes actual field elements from a private detector copy, preserving geometry constants and includes.",
   "_comment_seeds": "Two deterministic seeds are 42 and 1024. random_seeds=true instead makes all seeds random.",
   "_comment_mc_truth": "mc_truth=true preserves secondary-particle parent/daughter relations; it is not the detailed step/trajectory switch.",
   "_comment_keep_all_particles": "false is the recommended default: keep the normal MC-truth selection and configured energy/process filters. true retains every Geant4 track, including tracks that did not create a hit, and can greatly increase ROOT/CSV size. It is not needed for detailed shower positions.",

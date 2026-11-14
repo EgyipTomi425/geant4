@@ -15,8 +15,8 @@ Pelda:
         --detector standalone fulldet \\
         --jobs 6
 
-Mezo nelkuli futtatas (a compact XML-bol kiszurve a "compact/fields/..."
-include-ok, pl. a szolenoid es a nyalabvezetek-magnesek):
+Mezo nelkuli futtatas (a geometria sajat masolatabol eltavolitott
+mezodefiniciokkal; a geometriai konstansok megmaradnak):
     python3 run_simulations.py \\
         --particles e- \\
         --num-seeds 1 \\
@@ -47,7 +47,7 @@ import itertools
 import json
 import os
 import random
-import re
+import xml.etree.ElementTree as ET
 import shutil
 import subprocess
 import sys
@@ -169,63 +169,48 @@ def build_steering_extras(args: argparse.Namespace) -> str:
     return block
 
 
-# ---------------------------------------------------------------------------
-# --no-field tamogatas
-#
-# A magneses (es nyalabvezetek-) mezot a compact XML "compact/fields/..."
-# alatti fajlokra mutato <include ref="..."/> sorai definialjak. A ddsim-nek
-# nincs futasidejű kapcsolója ennek kikapcsolasara, mert a mezo a geometria
-# resze, nem a futtatasi beallitasoke. Ezert egy szurt compact XML-t
-# generalunk, amiben ezek az include-ok hianyoznak, es azt adjuk at a
-# --compactFile parameterkent. Az eredeti (kozos, tobbnyire irasvedett)
-# compact fajlokat sosem modositjuk.
-# ---------------------------------------------------------------------------
-FIELD_INCLUDE_PATTERN = re.compile(r'<include\s+ref="[^"]*compact/fields/[^"]*"\s*/?>')
-
-
-def strip_field_includes(xml_path: Path) -> str:
-    """
-    Beolvassa a megadott compact XML-t, es eltavolitja azokat a sorokat,
-    amelyek "compact/fields/..." alatti fajlt includalnak (pl. szolenoid,
-    nyalabvezetek-magnesek). Visszaadja a szurt XML tartalmat szovegkent.
-    """
-    text = xml_path.read_text()
-    lines = text.splitlines(keepends=True)
-    filtered = [line for line in lines if not FIELD_INCLUDE_PATTERN.search(line)]
-    removed = len(lines) - len(filtered)
-    if removed == 0:
-        print(
-            f"[FIGYELEM] --no-field van megadva, de nem talaltam "
-            f"'compact/fields/...' include-ot ebben a fajlban: {xml_path}. "
-            f"Lehet, hogy ez a compact fajl mar eleve mezo nelkuli, vagy mas "
-            f"utvonalmintat hasznal.",
-            file=sys.stderr,
-        )
-    else:
-        print(f"[no-field] {removed} field-include sor kiszurve ebbol: {xml_path}")
-    return "".join(filtered)
+# No-field geometry is a private copy: preserve all defines/includes and remove
+# actual field elements, including fields defined by nested subsystem XMLs.
+_NO_FIELD_GEOMETRIES: dict[Path, Path] = {}
 
 
 def make_no_field_compact_file(original_path: str, cache_dir: Path) -> str:
-    """
-    Legyartja (vagy - ha mar letezik es friss - ujrahasznositja) az eredeti
-    compact XML mezo nelkuli valtozatat egy sajat, irhato cache konyvtarban,
-    es visszaadja az uj fajl eleresi utjat. Az eredeti fajlt nem modositja.
-    """
-    original = Path(original_path)
-    if not original.exists():
+    original = Path(original_path).resolve()
+    detector_root = Path(os.environ.get("DETECTOR_PATH", original.parent)).resolve()
+    if not original.is_file():
         raise RuntimeError(f"A compact fajl nem talalhato: {original}")
-
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    out_path = cache_dir / f"{original.stem}_nofield.xml"
-
-    # Ujragyartas, ha meg nem letezik, vagy ha az eredeti fajl ujabb nala
-    # (pl. valaki frissitette a detektor-telepitest).
-    if not out_path.exists() or original.stat().st_mtime > out_path.stat().st_mtime:
-        filtered_text = strip_field_includes(original)
-        out_path.write_text(filtered_text)
-
-    return str(out_path)
+    relative = original.relative_to(detector_root)
+    mirror = _NO_FIELD_GEOMETRIES.get(detector_root)
+    if mirror is None:
+        mirror = (cache_dir / "geometry").resolve()
+        # Never recursively copy the destination if a caller places its cache
+        # inside the source detector installation.
+        if mirror == detector_root or detector_root in mirror.parents:
+            raise RuntimeError("The no-field cache must be outside DETECTOR_PATH")
+        shutil.copytree(detector_root, mirror, dirs_exist_ok=True)
+        removed = 0
+        for xml_path in mirror.rglob("*.xml"):
+            try:
+                tree = ET.parse(xml_path)
+            except ET.ParseError as error:
+                # Do not silently retain a possibly magnetic, unparsed XML.
+                raise RuntimeError(f"Cannot inspect detector XML: {xml_path}") from error
+            changed = False
+            for parent in tree.getroot().iter():
+                for child in list(parent):
+                    if child.tag.split("}")[-1] in ("fields", "field"):
+                        parent.remove(child)
+                        removed += 1
+                        changed = True
+            if changed:
+                tree.write(xml_path, encoding="unicode")
+        _NO_FIELD_GEOMETRIES[detector_root] = mirror
+        _NO_FIELD_GEOMETRIES[mirror] = mirror
+        print(f"[no-field] removed {removed} field elements; geometry: {mirror}")
+    # Includes use ${DETECTOR_PATH}; point them at the same field-free copy.
+    os.environ["DETECTOR_PATH"] = str(mirror)
+    os.environ["DETECTOR_CACHE"] = str(mirror)
+    return str(mirror / relative)
 
 
 @dataclass(frozen=True)
@@ -443,10 +428,9 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--detector", nargs="+", choices=["standalone", "fulldet"],
                     default=["standalone"])
     p.add_argument("--no-field", action="store_true",
-                    help="A magneses (es nyalabvezetek-) mezot kihagyja a compact "
-                         "geometriabol. Ehhez egy szurt compact XML-t general "
-                         "(<roots-dir>/_nofield_compact ala), az eredeti compact "
-                         "fajlokat nem modositja.")
+                    help="A geometria sajat masolatabol eltavolitja a mezodefiniciokat "
+                         "(<roots-dir>/_nofield_compact/geometry), a konstansokat "
+                         "es az eredeti geometriat megorizve.")
     p.add_argument("--physics-list", default="FTFP_BERT",
                     help="SIM.physicsList erteke (alap: FTFP_BERT, ami a ddsim "
                          "alapertelmezese is - itt explicit kikerul a steering "
