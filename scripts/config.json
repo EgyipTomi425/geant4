@@ -22,7 +22,7 @@
     "pi+Inelastic",
     "pi-Inelastic"
   ],
-  "detailed_shower": false,
+  "detailed_shower": true,
   "converter": "auto",
   "contributions": "earliest",
   "name_tag": "truthsteps",
