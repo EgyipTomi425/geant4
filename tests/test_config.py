@@ -29,8 +29,18 @@ class DefaultConfigTests(unittest.TestCase):
             [job.seed_value for job in jobs[:2]],
             [42, 1024],
         )
-        self.assertEqual({job.num_events for job in jobs}, {1000})
+        self.assertEqual({job.num_events for job in jobs}, {1500000})
         self.assertEqual({job.detector for job in jobs}, {"standalone", "fulldet"})
+
+    def test_ci_event_override_keeps_production_event_count_out_of_jobs(self):
+        args = run_simulations.parse_args(
+            ["--config", str(self.config_path), "--events", "100", "--jobs", "2"]
+        )
+        jobs = run_simulations.build_job_list(args)
+        self.assertEqual(len(jobs), 16)
+        self.assertEqual({job.num_events for job in jobs}, {100})
+        self.assertEqual(args.jobs, 2)
+        self.assertEqual(self.config["events"], [1500000])
 
     def test_mc_truth_and_detailed_steps_are_enabled_without_keep_all(self):
         self.assertTrue(self.args.mc_truth)

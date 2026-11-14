@@ -235,7 +235,7 @@ outputs were created. If Apptainer is missing, `update.sh` installs it.
 - **Conversion fails after simulation:** the ROOT file is retained in
   `roots_dir`; the failed job's scratch directory includes its steering file.
 
-The default JSON uses 1000 events, both `standalone` and `fulldet`, seeds 42
+The default JSON uses 1,500,000 events, both `standalone` and `fulldet`, seeds 42
 and 1024, no magnetic field, MC truth, detailed shower data, and `earliest`
 contribution export. `--no-field` places a private detector copy beneath
 `roots_dir/_nofield_compact/geometry`; this also keeps beamline constants
@@ -255,3 +255,142 @@ exported; detailed shower data remain in ROOT and populate contribution PDG.
 `energy` is the total hit energy even when only the earliest contribution is
 exported. `contribution_index` is zero-based within the hit, not an index into
 the event-wide contribution collection.
+
+## Production run guide
+
+The repository default is **1,500,000 events per particle/detector/seed
+combination**, not 1,500,000 events across the whole run. Four particle types
+(`e-`, `mu-`, `proton`, `pi+`), two detector modes (`standalone`, `fulldet`), and
+two deterministic seeds (42 and 1024) create **16 jobs and 24,000,000 events**.
+There is one injected primary particle per event. The configuration uses
+0–20 GeV momentum, 7–36 degree polar angles, `FTFP_BERT`, no magnetic field,
+MC truth, `keep_all_particles: false`, a 1 MeV truth-selection threshold,
+`detailed_shower: true`, and `contributions: "earliest"`.
+
+### Install and prepare the configuration
+
+```bash
+git clone https://github.com/EgyipTomi425/geant4.git
+cd geant4
+./update.sh
+```
+
+The updater installs Apptainer if necessary and builds the image. Network,
+sudo/root access for installation, and sufficient disk space are required.
+On an existing installation, `./update.sh` **preserves** `apptainer/config.json`.
+Updating Git alone therefore does not change a previously copied event count.
+Inspect your working config before starting. To deliberately replace it with
+the repository default, discarding local configuration edits:
+
+```bash
+./update.sh --reset-config
+```
+
+Alternatively, copy the default to a separately named configuration and edit it:
+
+```bash
+cp scripts/config.json apptainer/production.json
+```
+
+Relative output paths are resolved from the selected JSON file's directory.
+The default produces `apptainer/output/roots/` and `apptainer/output/csv/`.
+Put the checkout or use explicit absolute output paths on the large data disk;
+check its actual mount and free capacity with `df -hT`.
+
+### Preview, then launch in tmux
+
+From `geant4/apptainer`, preview the selected configuration without simulation:
+
+```bash
+cd apptainer
+./geant-generator.sif --config ./config.json --dry-run
+```
+
+Check the 16 planned jobs and **N1500000** in their names before launching.
+Use `--config ./production.json` instead if you made that separate config.
+A small validation run can explicitly override the event count, for example
+`--events 100 --jobs 2`; this creates real data, so use separate output paths.
+
+For an intentionally authorized full run, in the same directory:
+
+```bash
+tmux new -s geant4
+set -o pipefail
+./geant-generator.sif --config ./config.json 2>&1 | tee generation.log
+```
+
+Detach without stopping the run with **Ctrl+B**, then **D**. Reattach with
+`tmux attach -t geant4`. `tee` saves the complete log to disk; tmux keeps only
+its configured scrollback buffer. The configured `jobs: 100` is capped at the
+16 actual jobs. To reduce simultaneous memory/CPU demand, add `--jobs 4`.
+Do not run a second copy with the same output paths: names would collide.
+
+### Understand the outputs
+
+- `standalone` loads `epic_lfhcal_only.xml`; `fulldet` loads the complete
+  `epic.xml`. In both cases the no-field geometry is a private copy with
+  actual field definitions removed and geometry constants retained.
+- Full-detector ROOT files retain the other detector hit collections as well.
+  **CSV exports only LFHCALHits**, even for `fulldet`; other detector material
+  still affects those hits because transport is simulated in the full geometry.
+- CSV files are placed under `output/csv/regression-<particle>/`. The filename
+  includes the detector, event count, momentum range, and seed index. `s1`
+  means seed 42 and `s2` means seed 1024; those are indices, not seed values.
+- The particle-aware CSV has exactly these 25 columns, in this order:
+
+```csv
+event_number,cellID,x,y,z,energy,earliest_contribution_time,incoming_momentum,incoming_theta,incoming_phi,n_contributions,contribution_index,contrib_pdg,contrib_type,contrib_energy,contrib_energy_fraction,contrib_time,particle_index,particle_pdg,particle_type,is_secondary,parent_pdg,parent_type,daughter_pdg,daughter_type
+```
+
+`x/y/z` are hit/cell positions in **mm**. Times are in **ns**, energies in
+**GeV**, momentum in **GeV/c**, and CSV angles in **radians** (the JSON angle
+limits are in degrees). `energy` is the total hit energy; `contrib_energy`
+is the selected contribution's energy, and its fraction is relative to that
+hit energy. There is no separate event-total-energy column. With `earliest`,
+each hit appears once; summing `energy` by event gives deposited LFHCAL energy,
+not total incoming energy or the sum over the whole detector.
+
+`contribution_index` is local to the hit. `contrib_pdg/type` identify the actual
+contribution; `particle_pdg/type` identify the linked saved MCParticle, which
+can be an ancestor when truth thinning occurs. `parent_*` and `daughter_*`
+are the saved immediate relations, with multiple entries separated by `;`.
+They can describe interaction products as well as decays. Empty relations
+are allowed, and the selection filters do not guarantee every secondary is
+retained. Detailed shower fills contribution PDG and detailed ROOT step data;
+step-position/length columns are intentionally absent from this legacy CSV.
+
+A successful run ends with `Kesz: 16/16 sikeres.` and exit code 0. Verify 16
+ROOT and 16 CSV files and inspect a CSV header. If a job fails, its scratch
+folder under `roots_dir/_work/` is retained for diagnosis. The number of CSV
+rows is the number of LFHCAL hits, not the number of injected events; events
+with no LFHCAL hit have no CSV row.
+
+### Storage estimate for N = 1,500,000
+
+The following is a linear extrapolation from the validated 1,000-event test
+with this 25-column schema, detailed shower enabled, earliest export, all four
+particle types, and both seeds. TB below are decimal, not TiB.
+
+| Detector mode | ROOT | CSV | Total |
+|---|---:|---:|---:|
+| standalone | 2.01 TB | 1.11 TB | 3.12 TB |
+| fulldet | 5.01 TB | 0.68 TB | 5.70 TB |
+| Both | **7.02 TB** | **1.79 TB** | **8.82 TB** |
+
+Plan for **11–12 TB free**, including margin for statistical variation,
+temporary files, container images and logs. This is an estimate, not a measured
+24-million-event run; a different detector/nightly version or configuration can
+change the sizes. Keeping only CSV would reduce final retained size, but the
+runner currently retains ROOT as well. A roughly 16 TiB disk has sufficient
+capacity for this estimate if it has that free space available.
+
+### CI versus production
+
+CI validates the production JSON with `--dry-run`; it does not run 1.5 million
+events per job. Its integration run explicitly overrides to **100 events** and
+2 concurrent jobs, while checking both detector modes and all 16 output pairs.
+Ubuntu user namespaces are enabled and checked before building Apptainer.
+The nightly base SIF is cached per UTC day to avoid repeated OCI conversion;
+the generator layer is rebuilt from the current scripts. New pushes cancel
+obsolete runs on the same branch. Source/config changes are tested; a green
+syntax/unit-test job alone does not mean the integration job has completed.

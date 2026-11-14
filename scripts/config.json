@@ -8,7 +8,7 @@
   "num_seeds": 2,
   "random_seeds": false,
   "events": [
-    1000
+    1500000
   ],
   "theta_min": 7,
   "theta_max": 36,

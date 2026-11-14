@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-26.04
@@ -45,8 +49,22 @@ jobs:
             sudo sysctl -w kernel.unprivileged_userns_clone=1
           fi
           unshare --user --map-root-user true
+      - name: Select daily EIC image cache key
+        id: eic-cache-key
+        run: echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+      - name: Cache the EIC base SIF
+        id: eic-cache
+        uses: actions/cache@v4
+        with:
+          path: .build/eic_xl-nightly.sif
+          key: eic-xl-nightly-${{ runner.os }}-${{ runner.arch }}-${{ steps.eic-cache-key.outputs.day }}
       - name: Build the generator image
-        run: ./update.sh
+        run: |
+          if [ -f .build/eic_xl-nightly.sif ]; then
+            ./update.sh --base-sif "$PWD/.build/eic_xl-nightly.sif"
+          else
+            ./update.sh
+          fi
       - name: Verify current-directory config discovery
         working-directory: apptainer
         run: ./geant-generator.sif --dry-run
