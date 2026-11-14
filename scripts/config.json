@@ -24,7 +24,7 @@
   ],
   "detailed_shower": true,
   "converter": "auto",
-  "contributions": "all",
+  "contributions": "earliest",
   "name_tag": "truthsteps",
   "jobs": 100,
   "output_dir": "./output/csv",
